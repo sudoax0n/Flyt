@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+/* ============================================================
+   Print / PDF report styles (Task D / K-07)
+   Triggered by "Export PDF Report" → window.print().
+   Hides nav, sidebar, buttons, and the tracking-feed video; shows
+   only the analytics charts + metric cards for a clean paper/PDF export.
+   ============================================================ */
+@media print {
+  /* Neutral palette: PDF reads better on white regardless of dark-mode UI. */
+  html, body {
+    background: #ffffff !important;
+    color: #18181b !important;
+  }
+
+  /* Full-bleed: drop the app's max-width padding. */
+  .max-w-6xl {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  /* Hide the sidebar, top progress bar, and any element tagged no-print
+     (export buttons, live-feed header chip, jump-to-frame row). */
+  aside,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Force the main content area to use the full page width. */
+  main {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  /* Make the main content area span full width once the sidebar is gone. */
+  .flex.h-full.w-full {
+    display: block !important;
+  }
+
+  /* Keep chart cards on a white background with a visible border. */
+  .bg-white,
+  .dark\:bg-\[\#000000\] {
+    background: #ffffff !important;
+    border-color: #d4d4d8 !important;
+    color: #18181b !important;
+    break-inside: avoid;
+  }
+
+  /* Charts: let them render at a print-friendly height. */
+  .h-\[260px\] {
+    height: 220px !important;
+  }
+
+  /* Reset the app's no-scroll / full-height shell so content flows. */
+  .h-screen,
+  .overflow-hidden {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Avoid awkward page breaks inside a metric card. */
+  .p-5, .p-6, .p-8 {
+    break-inside: avoid;
+  }
+}

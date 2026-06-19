@@ -1,0 +1,37 @@
+# Python Virtual Environment
+source app folder/tracker/venv/
+source app folder/tracker/__pycache__/
+*.pyc
+
+# Node dependencies and build files
+source app folder/dashboard/node_modules/
+source app folder/dashboard/dist/
+source app folder/dashboard/dist-ssr/
+
+# User uploads and runtime outputs
+source app folder/dashboard/uploads/
+source app folder/dashboard/public/tracked.mp4
+source app folder/dashboard/public/tracked_raw.mp4
+source app folder/dashboard/public/data.csv
+source app folder/dashboard/public/events.json
+source app folder/dashboard/public/run_metadata.json
+source app folder/dashboard/public/verification.json
+source app folder/dashboard/public/history/
+source app folder/dashboard/public/history.json
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Editor and OS
+.vscode/
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+terminals/
+
