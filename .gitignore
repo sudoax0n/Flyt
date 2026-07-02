@@ -1,6 +1,7 @@
 # Python Virtual Environment
 source app folder/tracker/venv/
 source app folder/tracker/__pycache__/
+source app folder/tracker/*.mp4
 *.pyc
 
 # Node dependencies and build files
@@ -34,4 +35,17 @@ npm-debug.log*
 *.sln
 *.sw?
 terminals/
+
+# Agent Context & Lab Research (Unrelated to clean app release)
+AGENTS.md
+gemini.md
+improvements.md
+handoff-current.md
+changelog.md
+comp2.5-benchmarks.md
+readme-old.md
+flyt-modal/
+mcps/
+researches/
+thinking/
 
