@@ -1,0 +1,17 @@
+{
+  "name": "Flyt — Drosophila Behavior Analytics",
+  "short_name": "Flyt",
+  "description": "Local, deterministic Drosophila tracking and human-verified behavior analytics.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070A12",
+  "theme_color": "#0B1020",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
