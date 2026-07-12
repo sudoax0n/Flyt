@@ -4,11 +4,15 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently --kill-others \"node server-safe.js\" \"vite\"",
+    "dev": "concurrently --kill-others \"node server.js\" \"vite\"",
     "dev:frontend": "vite",
-    "dev:server": "node server-safe.js",
+    "dev:server": "node server.js",
     "build": "vite build",
     "lint": "eslint .",
+    "lint:backend": "eslint server.js server-utils.js tests",
+    "test": "npm run test:server",
+    "test:server": "node --test tests/*.test.js",
+    "check": "npm run lint:backend && npm run test:server && npm run build",
     "preview": "vite preview"
   },
   "dependencies": {
