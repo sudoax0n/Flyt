@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently --kill-others \"node server.js\" \"vite\"",
+    "dev": "concurrently --kill-others \"node server-safe.js\" \"vite\"",
     "dev:frontend": "vite",
-    "dev:server": "node server.js",
+    "dev:server": "node server-safe.js",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
