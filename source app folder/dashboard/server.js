@@ -74,8 +74,9 @@ function blankJob() {
 const isBusy = () => uploadReserved || terminating || ['uploading', 'processing'].includes(job.status);
 const isCurrent = (context) => context.epoch === epoch && context.runId === job.runId;
 
-function reserveUpload(_req, res, next) {
+function reserveUpload(req, res, next) {
   if (isBusy()) return res.status(409).json({ error: 'A video is already uploading, processing, or stopping.' });
+  req.uploadEpoch = epoch;
   uploadReserved = true;
   let released = false;
   const release = () => { if (!released) { released = true; uploadReserved = false; } };
@@ -266,9 +267,9 @@ app.get('/api/status', (_req, res) => res.json({ ...job }));
 
 app.post('/api/upload', reserveUpload, upload.single('video'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No video file provided' });
-  if (isBusy() && !uploadReserved) {
+  if (req.uploadEpoch !== epoch) {
     safeUnlink(req.file.path);
-    return res.status(409).json({ error: 'A video is already being processed.' });
+    return res.status(409).json({ error: 'Upload was cancelled by a reset.' });
   }
   await stopActiveTracker();
   runSequence += 1;
