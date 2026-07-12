@@ -284,6 +284,19 @@ def run_tracker(args: argparse.Namespace) -> int:
                     cv2.circle(frame, f1_coords, 5, (255, 0, 0), -1)
                     cv2.circle(frame, f2_coords, 5, (0, 0, 255), -1)
                     cv2.line(frame, f1_coords, f2_coords, (0, 255, 255), 2)
+                    text_pos = (
+                        min(f1_coords[0], f2_coords[0]),
+                        max(0, min(f1_coords[1], f2_coords[1]) - 10),
+                    )
+                    cv2.putText(
+                        frame,
+                        f"Dist: {int(proximity)}px",
+                        text_pos,
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (0, 255, 255),
+                        2,
+                    )
             elif len(centroids) == 1:
                 point = centroids[0]
                 was_initialized = is_initialized
