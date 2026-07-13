@@ -7,6 +7,12 @@ on:
     paths:
       - '.github/scripts/apply-review-hardening.py'
       - '.github/workflows/apply-review-hardening.yml'
+  pull_request:
+    paths:
+      - '.github/scripts/apply-review-hardening.py'
+      - '.github/workflows/apply-review-hardening.yml'
+      - 'source app folder/dashboard/src/App.jsx'
+      - 'source app folder/dashboard/tests/frontend-contract.test.js'
 
 permissions:
   contents: write
