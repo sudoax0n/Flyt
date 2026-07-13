@@ -124,8 +124,10 @@ export function createFlytServer(options = {}) {
   let uploadReserved = false;
   let terminating = false;
   let activeRun = null;
+  let stoppingRun = null;
   let job = blankJob();
   const pendingUploads = new Map();
+  const observedStoppingChildren = new WeakSet();
 
   const services = {
     countFrames: options.services?.countFrames || ((filePath, context) => getVideoFrameCount(
@@ -186,6 +188,34 @@ export function createFlytServer(options = {}) {
     && !context.controller.signal.aborted
   );
 
+  function reconcileStoppingState() {
+    const context = stoppingRun;
+    const contextFinished = !context || context.finished;
+    const childrenStopped = !context || context.children.size === 0;
+    if (!terminating || !contextFinished || !childrenStopped || pendingUploads.size > 0) {
+      return false;
+    }
+
+    stoppingRun = null;
+    terminating = false;
+    if (
+      job.status === 'stopping'
+      || (job.status === 'error' && job.error?.startsWith('Could not terminate active work:'))
+    ) {
+      job = blankJob();
+    }
+    return true;
+  }
+
+  function observeStoppingChildren(context) {
+    if (!context) return;
+    context.children.forEach((child) => {
+      if (observedStoppingChildren.has(child)) return;
+      observedStoppingChildren.add(child);
+      child.once('close', () => queueMicrotask(reconcileStoppingState));
+    });
+  }
+
   function reserveUpload(req, res, next) {
     if (isBusy()) {
       return res.status(409).json({ error: 'A video is already uploading, processing, or stopping.' });
@@ -205,6 +235,7 @@ export function createFlytServer(options = {}) {
       released = true;
       pendingUploads.delete(req);
       uploadReserved = pendingUploads.size > 0;
+      queueMicrotask(reconcileStoppingState);
     };
     state.release = release;
     pendingUploads.set(req, state);
@@ -258,17 +289,22 @@ export function createFlytServer(options = {}) {
   }
 
   async function stopActiveRun() {
-    epoch += 1;
-    const context = activeRun;
     const uploadStates = [...pendingUploads.values()];
+    const context = activeRun || stoppingRun;
+    if (activeRun || uploadStates.length > 0) epoch += 1;
+    if (activeRun) stoppingRun = activeRun;
     activeRun = null;
+
     const hasWork = Boolean(context) || uploadStates.length > 0;
     job = { ...blankJob(), status: hasWork ? 'stopping' : 'idle' };
-    if (!hasWork) return;
+    if (!hasWork) {
+      reconcileStoppingState();
+      return;
+    }
 
     terminating = true;
     context?.controller.abort();
-    let stoppedCleanly = false;
+    observeStoppingChildren(context);
     try {
       const children = context ? [...context.children] : [];
       await Promise.all([
@@ -281,7 +317,6 @@ export function createFlytServer(options = {}) {
         });
       }
       job = blankJob();
-      stoppedCleanly = true;
     } catch (error) {
       job = {
         ...blankJob(),
@@ -290,11 +325,7 @@ export function createFlytServer(options = {}) {
       };
       throw error;
     } finally {
-      if (
-        stoppedCleanly
-        && (!context || context.children.size === 0)
-        && pendingUploads.size === 0
-      ) terminating = false;
+      reconcileStoppingState();
     }
   }
 
@@ -316,6 +347,7 @@ export function createFlytServer(options = {}) {
       controller: new AbortController(),
       children: new Set(),
       done: null,
+      finished: false,
     };
   }
 
@@ -437,7 +469,9 @@ export function createFlytServer(options = {}) {
     } finally {
       safeUnlink(context.inputPath);
       safeRemoveDir(context.workDir);
+      context.finished = true;
       if (activeRun === context && context.children.size === 0) activeRun = null;
+      reconcileStoppingState();
     }
   }
 
@@ -554,6 +588,7 @@ export function createFlytServer(options = {}) {
       terminating,
       pendingUploads: pendingUploads.size,
       activeRun,
+      stoppingRun,
       job: { ...job },
     }),
     paths: { uploadsDir, publicDir, historyDir, historyMetaPath, verificationPath },
