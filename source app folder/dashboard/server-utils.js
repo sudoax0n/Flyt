@@ -85,9 +85,10 @@ export function validateFrameIntegrity({
   };
   Object.entries(counts).forEach(([name, value]) => requirePositiveInteger(name, value));
 
-  if (syncInfo.expectedVideoFrames > 0) {
-    requirePositiveInteger('trackerExpectedFrames', syncInfo.expectedVideoFrames);
-    counts.trackerExpectedFrames = syncInfo.expectedVideoFrames;
+  if (!Number.isInteger(syncInfo.expectedVideoFrames) || syncInfo.expectedVideoFrames < 0) {
+    throw new Error(
+      `Frame integrity evidence missing or invalid: trackerExpectedFrames=${syncInfo.expectedVideoFrames}`,
+    );
   }
 
   const unique = new Set(Object.values(counts));
@@ -96,7 +97,14 @@ export function validateFrameIntegrity({
     throw new Error(`Frame integrity mismatch (${detail})`);
   }
 
-  return { ...counts, syncOk: true };
+  return {
+    ...counts,
+    trackerExpectedFrames: syncInfo.expectedVideoFrames,
+    expectedMetadataMatches: (
+      syncInfo.expectedVideoFrames === 0 || syncInfo.expectedVideoFrames === inputFrames
+    ),
+    syncOk: true,
+  };
 }
 
 const terminationPromises = new WeakMap();
@@ -227,55 +235,170 @@ export async function transcodeVideo(ffmpegPath, rawPath, finalPath, options = {
   }
 }
 
-export function publishBundle(entries, token, { faultInjector } = {}) {
-  const staged = [];
-  const backups = [];
-  const published = [];
-  try {
-    for (const { source, destination } of entries) {
-      if (!fs.existsSync(source)) throw new Error(`Missing publish source: ${source}`);
-      ensureDir(path.dirname(destination));
-      const stage = `${destination}.${token}.new`;
-      fs.copyFileSync(source, stage);
-      staged.push(stage);
-    }
-    faultInjector?.('staged', -1);
+export class SimulatedProcessCrash extends Error {
+  constructor(message = 'Simulated process crash') {
+    super(message);
+    this.name = 'SimulatedProcessCrash';
+  }
+}
 
-    for (const { destination } of entries) {
-      if (fs.existsSync(destination)) {
-        const backup = `${destination}.${token}.bak`;
-        fs.renameSync(destination, backup);
-        backups.push({ destination, backup });
+function validatePublishToken(token) {
+  if (!/^[A-Za-z0-9-]+$/.test(String(token))) {
+    throw new Error(`Invalid publication token: ${token}`);
+  }
+}
+
+function publishManifestPath(entries, token, manifestDir) {
+  if (!entries.length) throw new Error('Publication bundle is empty');
+  validatePublishToken(token);
+  const directory = manifestDir || path.dirname(entries[0].destination);
+  ensureDir(directory);
+  return path.join(directory, `.flyt-publish-${token}.json`);
+}
+
+function validatePublishManifest(manifest, manifestPath) {
+  if (!manifest || manifest.version !== 1 || !Array.isArray(manifest.entries)) {
+    throw new Error(`Invalid publication transaction manifest: ${manifestPath}`);
+  }
+  if (!['prepared', 'publishing', 'committed'].includes(manifest.state)) {
+    throw new Error(`Invalid publication transaction state in ${manifestPath}`);
+  }
+  manifest.entries.forEach((entry) => {
+    for (const key of ['destination', 'stage', 'backup']) {
+      if (typeof entry[key] !== 'string' || !path.isAbsolute(entry[key])) {
+        throw new Error(`Invalid ${key} in publication transaction ${manifestPath}`);
       }
     }
-    faultInjector?.('backed-up', -1);
+    if (typeof entry.hadDestination !== 'boolean') {
+      throw new Error(`Invalid hadDestination in publication transaction ${manifestPath}`);
+    }
+  });
+  return manifest;
+}
 
-    entries.forEach(({ destination }, index) => {
-      fs.renameSync(staged[index], destination);
-      published.push(destination);
+function rollbackPublishManifest(manifest) {
+  const errors = [];
+  [...manifest.entries].reverse().forEach((entry) => {
+    try {
+      if (entry.hadDestination) {
+        if (fs.existsSync(entry.backup)) {
+          safeUnlink(entry.destination);
+          ensureDir(path.dirname(entry.destination));
+          fs.renameSync(entry.backup, entry.destination);
+        } else if (!fs.existsSync(entry.destination)) {
+          throw new Error(`Cannot restore missing prior destination: ${entry.destination}`);
+        }
+      } else {
+        safeUnlink(entry.destination);
+        safeUnlink(entry.backup);
+      }
+      safeUnlink(entry.stage);
+    } catch (error) {
+      errors.push(error);
+    }
+  });
+  if (errors.length) {
+    throw new globalThis.AggregateError(errors, 'Publication transaction rollback failed');
+  }
+}
+
+function finalizeCommittedManifest(manifest) {
+  const missing = manifest.entries.filter((entry) => !fs.existsSync(entry.destination));
+  if (missing.length) {
+    rollbackPublishManifest(manifest);
+    return;
+  }
+  manifest.entries.forEach((entry) => {
+    safeUnlink(entry.stage);
+    safeUnlink(entry.backup);
+  });
+}
+
+function listFilesRecursive(directory) {
+  if (!fs.existsSync(directory)) return [];
+  const files = [];
+  fs.readdirSync(directory, { withFileTypes: true }).forEach((entry) => {
+    const fullPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...listFilesRecursive(fullPath));
+    else if (entry.isFile()) files.push(fullPath);
+  });
+  return files;
+}
+
+export function publishBundle(entries, token, { faultInjector, manifestDir } = {}) {
+  const manifestPath = publishManifestPath(entries, token, manifestDir);
+  const manifest = {
+    version: 1,
+    token,
+    state: 'prepared',
+    entries: entries.map(({ source, destination }) => ({
+      source,
+      destination: path.resolve(destination),
+      stage: path.resolve(`${destination}.${token}.new`),
+      backup: path.resolve(`${destination}.${token}.bak`),
+      hadDestination: fs.existsSync(destination),
+    })),
+  };
+
+  try {
+    manifest.entries.forEach((entry) => {
+      if (!fs.existsSync(entry.source)) throw new Error(`Missing publish source: ${entry.source}`);
+      ensureDir(path.dirname(entry.destination));
+      fs.copyFileSync(entry.source, entry.stage);
+    });
+    writeJson(manifestPath, manifest);
+    faultInjector?.('prepared', -1);
+
+    manifest.entries.forEach((entry, index) => {
+      if (entry.hadDestination) fs.renameSync(entry.destination, entry.backup);
+      faultInjector?.('backed-up', index);
+    });
+    manifest.state = 'publishing';
+    writeJson(manifestPath, manifest);
+
+    manifest.entries.forEach((entry, index) => {
+      fs.renameSync(entry.stage, entry.destination);
       faultInjector?.('published', index);
     });
-    backups.forEach(({ backup }) => safeUnlink(backup));
+    manifest.state = 'committed';
+    writeJson(manifestPath, manifest);
+    faultInjector?.('committed', -1);
+
+    finalizeCommittedManifest(manifest);
+    safeUnlink(manifestPath);
   } catch (error) {
-    published.reverse().forEach((destination) => safeUnlink(destination));
-    backups.reverse().forEach(({ destination, backup }) => {
-      if (fs.existsSync(backup)) fs.renameSync(backup, destination);
-    });
-    staged.forEach((stage) => safeUnlink(stage));
+    if (error instanceof SimulatedProcessCrash) throw error;
+    try {
+      rollbackPublishManifest(manifest);
+      safeUnlink(manifestPath);
+    } catch (rollbackError) {
+      throw new globalThis.AggregateError([error, rollbackError], 'Publication failed and rollback was incomplete');
+    }
     throw error;
   }
 }
 
 export function recoverPublishArtifacts(directory) {
   if (!fs.existsSync(directory)) return;
-  const names = fs.readdirSync(directory);
-  names.filter((name) => name.endsWith('.new')).forEach((name) => safeUnlink(path.join(directory, name)));
-  names.filter((name) => name.endsWith('.bak')).forEach((name) => {
-    const backup = path.join(directory, name);
-    const destination = backup.replace(/\.[^.]+\.bak$/, '');
-    if (!fs.existsSync(destination)) fs.renameSync(backup, destination);
-    else safeUnlink(backup);
+  const manifests = fs.readdirSync(directory)
+    .filter((name) => /^\.flyt-publish-[A-Za-z0-9-]+\.json$/.test(name))
+    .map((name) => path.join(directory, name));
+
+  manifests.forEach((manifestPath) => {
+    const manifest = validatePublishManifest(readJson(manifestPath, null), manifestPath);
+    if (manifest.state === 'committed') finalizeCommittedManifest(manifest);
+    else rollbackPublishManifest(manifest);
+    safeUnlink(manifestPath);
   });
+
+  const artifacts = listFilesRecursive(directory);
+  const orphanBackups = artifacts.filter((filePath) => filePath.endsWith('.bak'));
+  if (orphanBackups.length) {
+    throw new Error(
+      `Unrecoverable publication backups without a transaction manifest: ${orphanBackups.join(', ')}`,
+    );
+  }
+  artifacts.filter((filePath) => filePath.endsWith('.new')).forEach(safeUnlink);
 }
 
 export function buildTrackerArgs(trackerScript, inputPath, outputs, overrides = {}, defaults) {
@@ -317,14 +440,29 @@ export function readCsvAvgProximity(csvPath) {
   const headers = lines[0].split(',');
   const proximityIndex = headers.indexOf('proximity_distance');
   const occlusionIndex = headers.indexOf('occlusion_flag');
+  const trackingValidIndex = headers.indexOf('tracking_valid');
+  const detectionCountIndex = headers.indexOf('detection_count');
+  const fly1AreaIndex = headers.indexOf('fly1_area');
+  const fly2AreaIndex = headers.indexOf('fly2_area');
   if (proximityIndex < 0) return null;
+
   let total = 0;
   let count = 0;
   lines.slice(1).forEach((line) => {
     const columns = line.split(',');
-    const proximity = Number(columns[proximityIndex]);
-    const occluded = occlusionIndex >= 0 && Number(columns[occlusionIndex]) === 1;
-    if (Number.isFinite(proximity) && !occluded) {
+    const rawProximity = columns[proximityIndex]?.trim();
+    if (!rawProximity) return;
+    const proximity = Number(rawProximity);
+    const occluded = occlusionIndex >= 0 && Number(columns[occlusionIndex]) !== 0;
+    let trackingValid = true;
+    if (trackingValidIndex >= 0) {
+      trackingValid = Number(columns[trackingValidIndex]) === 1;
+    } else if (detectionCountIndex >= 0) {
+      trackingValid = Number(columns[detectionCountIndex]) >= 2;
+    } else if (fly1AreaIndex >= 0 && fly2AreaIndex >= 0) {
+      trackingValid = Number(columns[fly1AreaIndex]) > 0 && Number(columns[fly2AreaIndex]) > 0;
+    }
+    if (Number.isFinite(proximity) && trackingValid && !occluded) {
       total += proximity;
       count += 1;
     }
@@ -339,28 +477,65 @@ export function countCourtshipBouts(eventsPath) {
     : 0;
 }
 
-export function scopeEventsForHistory(eventsPath, runId, destinationPath) {
-  const data = readJson(eventsPath, { version: 1, events: [] });
-  data.events = Array.isArray(data.events) ? data.events.map((event) => ({
-    ...event,
-    original_id: event.original_id || event.id,
-    id: `${runId}:${event.original_id || event.id}`,
-  })) : [];
-  writeJson(destinationPath, data);
+const RUN_ID_PATTERN = /^run-[A-Za-z0-9][A-Za-z0-9-]{2,127}$/;
+
+function requireRunId(runId) {
+  if (!RUN_ID_PATTERN.test(String(runId))) throw new Error(`Invalid run ID: ${runId}`);
+  return String(runId);
 }
 
-export function snapshotRunToHistory({
-  historyDir, historyMetaPath, filename, durationSec, fps, totalFrames, csvSrc, eventsSrc,
+export function createRunId() {
+  return `run-${Date.now()}-${randomUUID().slice(0, 8)}`;
+}
+
+export function scopeEventsForRun(eventsPath, runId, destinationPath = eventsPath) {
+  const safeRunId = requireRunId(runId);
+  const prefix = `${safeRunId}:`;
+  const data = readJson(eventsPath, { version: 1, events: [] });
+  data.run_id = safeRunId;
+  data.events = Array.isArray(data.events) ? data.events.map((event) => {
+    const currentId = String(event.id || '');
+    const originalId = event.original_id
+      || (currentId.startsWith(prefix) ? currentId.slice(prefix.length) : currentId);
+    if (!originalId) throw new Error('Event ID missing while scoping run events');
+    return {
+      ...event,
+      original_id: originalId,
+      id: `${safeRunId}:${originalId}`,
+    };
+  }) : [];
+  writeJson(destinationPath, data);
+  return data;
+}
+
+export function scopeEventsForHistory(eventsPath, runId, destinationPath) {
+  return scopeEventsForRun(eventsPath, runId, destinationPath);
+}
+
+export function prepareRunHistoryBundle({
+  runId,
+  historyDir,
+  historyMetaPath,
+  historyIndexOutput,
+  filename,
+  durationSec,
+  fps,
+  totalFrames,
+  csvSrc,
+  eventsSrc,
+  verificationSrc,
 }) {
-  if (!fs.existsSync(csvSrc)) return null;
-  const runId = `run-${Date.now()}-${randomUUID().slice(0, 8)}`;
-  const runDir = path.join(historyDir, runId);
-  ensureDir(runDir);
-  fs.copyFileSync(csvSrc, path.join(runDir, 'data.csv'));
-  scopeEventsForHistory(eventsSrc, runId, path.join(runDir, 'events.json'));
-  writeJson(path.join(runDir, 'verification.json'), { version: 1, reviews: [] });
+  const safeRunId = requireRunId(runId);
+  for (const source of [csvSrc, eventsSrc, verificationSrc]) {
+    if (!fs.existsSync(source)) throw new Error(`Missing history source: ${source}`);
+  }
+  const history = readJson(historyMetaPath, { version: 1, runs: [] });
+  if (!Array.isArray(history.runs)) history.runs = [];
+  if (history.runs.some((run) => run.runId === safeRunId)) {
+    throw new Error(`History run already exists: ${safeRunId}`);
+  }
   const meta = {
-    runId,
+    runId: safeRunId,
     timestamp: new Date().toISOString(),
     filename: filename || 'unknown',
     durationSec: Math.round((durationSec || 0) * 10) / 10,
@@ -369,19 +544,34 @@ export function snapshotRunToHistory({
     avgProximity: readCsvAvgProximity(csvSrc),
     detectedBouts: countCourtshipBouts(eventsSrc),
   };
-  const history = readJson(historyMetaPath, { version: 1, runs: [] });
-  if (!Array.isArray(history.runs)) history.runs = [];
   history.runs.unshift(meta);
-  writeJson(historyMetaPath, history);
-  return meta;
+  writeJson(historyIndexOutput, history);
+
+  const runDir = path.join(historyDir, safeRunId);
+  return {
+    meta,
+    entries: [
+      { source: csvSrc, destination: path.join(runDir, 'data.csv') },
+      { source: eventsSrc, destination: path.join(runDir, 'events.json') },
+      { source: verificationSrc, destination: path.join(runDir, 'verification.json') },
+      { source: historyIndexOutput, destination: historyMetaPath },
+    ],
+  };
 }
 
-export function resolveVerificationPath(eventId, currentPath, historyDir, historyMetaPath) {
-  const separator = eventId.indexOf(':');
-  if (separator < 0) return currentPath;
-  const runId = eventId.slice(0, separator);
-  const history = readJson(historyMetaPath, { runs: [] });
-  const exists = Array.isArray(history.runs) && history.runs.some((run) => run.runId === runId);
-  if (!exists) throw new Error('Unknown historical run');
-  return path.join(historyDir, runId, 'verification.json');
+export function verificationPathForRun(runId, historyDir, { mustExist = true } = {}) {
+  const safeRunId = requireRunId(runId);
+  const root = path.resolve(historyDir);
+  const filePath = path.resolve(root, safeRunId, 'verification.json');
+  if (!filePath.startsWith(`${root}${path.sep}`)) throw new Error('Verification path escaped history root');
+  if (mustExist && !fs.existsSync(filePath)) throw new Error('Run verification file not found');
+  return filePath;
+}
+
+export function resolveVerificationPath(eventId, historyDir) {
+  const separator = String(eventId).indexOf(':');
+  if (separator <= 0 || separator === String(eventId).length - 1) {
+    throw new Error('Run-scoped event ID required');
+  }
+  return verificationPathForRun(String(eventId).slice(0, separator), historyDir);
 }

@@ -7,14 +7,17 @@ import test from 'node:test';
 import {
   buildTrackerArgs,
   parseTrackerSync,
+  prepareRunHistoryBundle,
   publishBundle,
+  readCsvAvgProximity,
   recoverPublishArtifacts,
   resolveVerificationPath,
   runCommand,
-  scopeEventsForHistory,
-  snapshotRunToHistory,
+  scopeEventsForRun,
+  SimulatedProcessCrash,
   terminateChild,
   validateFrameIntegrity,
+  verificationPathForRun,
 } from '../server-utils.js';
 
 const defaults = { minArea: 30, maxArea: 0, proximityThreshold: 60, boutMinFrames: 90 };
@@ -46,10 +49,12 @@ test('frame validation fails closed on missing evidence or disagreement', () => 
   assert.equal(validateFrameIntegrity(evidence).syncOk, true);
   assert.throws(() => validateFrameIntegrity({ ...evidence, syncInfo: null }), /marker required/);
   assert.throws(() => validateFrameIntegrity({ ...evidence, finalVideoFrames: 11 }), /mismatch/);
-  assert.throws(() => validateFrameIntegrity({
+  const diagnosticMismatch = validateFrameIntegrity({
     ...evidence,
     syncInfo: { ...evidence.syncInfo, expectedVideoFrames: 11 },
-  }), /mismatch/);
+  });
+  assert.equal(diagnosticMismatch.syncOk, true);
+  assert.equal(diagnosticMismatch.expectedMetadataMatches, false);
 });
 
 test('publishes a complete bundle and removes backups', () => {
@@ -94,57 +99,112 @@ test('rolls back after one destination has already been published', () => {
   assert.equal(fs.readdirSync(dir).some((name) => /\.(bak|new)$/.test(name)), false);
 });
 
-test('recovers orphaned publication artifacts after a crash', () => {
-  const dir = tempDir('flyt-recover-');
-  fs.writeFileSync(path.join(dir, 'data.csv.token.bak'), 'old-data');
-  fs.writeFileSync(path.join(dir, 'events.json.token.new'), 'new-events');
+test('crash recovery rolls back the entire partially published bundle', () => {
+  const dir = tempDir('flyt-crash-rollback-');
+  const sourceA = path.join(dir, 'source-a');
+  const sourceB = path.join(dir, 'source-b');
+  const destinationA = path.join(dir, 'a');
+  const destinationB = path.join(dir, 'b');
+  fs.writeFileSync(sourceA, 'new-a');
+  fs.writeFileSync(sourceB, 'new-b');
+  fs.writeFileSync(destinationA, 'old-a');
+  fs.writeFileSync(destinationB, 'old-b');
+
+  assert.throws(() => publishBundle([
+    { source: sourceA, destination: destinationA },
+    { source: sourceB, destination: destinationB },
+  ], 'crash-token', {
+    manifestDir: dir,
+    faultInjector(stage, index) {
+      if (stage === 'published' && index === 0) throw new SimulatedProcessCrash();
+    },
+  }), SimulatedProcessCrash);
+
+  assert.equal(fs.readFileSync(destinationA, 'utf8'), 'new-a');
+  assert.equal(fs.existsSync(destinationB), false);
   recoverPublishArtifacts(dir);
-  assert.equal(fs.readFileSync(path.join(dir, 'data.csv'), 'utf8'), 'old-data');
-  assert.equal(fs.existsSync(path.join(dir, 'events.json.token.new')), false);
+  assert.equal(fs.readFileSync(destinationA, 'utf8'), 'old-a');
+  assert.equal(fs.readFileSync(destinationB, 'utf8'), 'old-b');
+  assert.equal(fs.readdirSync(dir).some((name) => /flyt-publish|\.(bak|new)$/.test(name)), false);
 });
 
-test('history snapshots preserve dashboard summary fields and scoped reviews', () => {
+test('crash recovery finalizes an explicitly committed all-new bundle', () => {
+  const dir = tempDir('flyt-crash-commit-');
+  const source = path.join(dir, 'source');
+  const destination = path.join(dir, 'destination');
+  fs.writeFileSync(source, 'new');
+  fs.writeFileSync(destination, 'old');
+
+  assert.throws(() => publishBundle([
+    { source, destination },
+  ], 'commit-token', {
+    manifestDir: dir,
+    faultInjector(stage) {
+      if (stage === 'committed') throw new SimulatedProcessCrash();
+    },
+  }), SimulatedProcessCrash);
+
+  recoverPublishArtifacts(dir);
+  assert.equal(fs.readFileSync(destination, 'utf8'), 'new');
+  assert.equal(fs.readdirSync(dir).some((name) => /flyt-publish|\.(bak|new)$/.test(name)), false);
+});
+
+test('legacy orphan backups fail closed instead of reconstructing a mixed bundle', () => {
+  const dir = tempDir('flyt-orphan-backup-');
+  const backup = path.join(dir, 'data.csv.token.bak');
+  fs.writeFileSync(backup, 'old-data');
+  assert.throws(() => recoverPublishArtifacts(dir), /without a transaction manifest/);
+  assert.equal(fs.readFileSync(backup, 'utf8'), 'old-data');
+});
+
+test('history bundle uses scoped events and excludes invalid proximity observations', () => {
   const dir = tempDir('flyt-history-');
   const historyDir = path.join(dir, 'history');
   const historyMetaPath = path.join(dir, 'history.json');
+  const historyIndexOutput = path.join(dir, 'next-history.json');
   const csv = path.join(dir, 'data.csv');
   const events = path.join(dir, 'events.json');
+  const verification = path.join(dir, 'verification.json');
+  const runId = 'run-1234-abcd';
   fs.writeFileSync(csv, [
-    'frame,proximity_distance,occlusion_flag', '0,10,0', '1,0,1', '2,30,0',
+    'frame,proximity_distance,occlusion_flag,tracking_valid,detection_count',
+    '0,10,0,1,2',
+    '1,10,0,0,0',
+    '2,,1,0,1',
+    '3,30,0,1,2',
   ].join('\n'));
   fs.writeFileSync(events, JSON.stringify({
     events: [{ id: 'evt-001', type: 'courtship_bout' }],
   }));
-  const meta = snapshotRunToHistory({
-    historyDir, historyMetaPath, filename: 'flies.mp4', durationSec: 2.3,
-    fps: 30, totalFrames: 3, csvSrc: csv, eventsSrc: events,
-  });
-  assert.equal(meta.avgProximity, 20);
-  assert.equal(meta.detectedBouts, 1);
-  const scopedEvents = JSON.parse(fs.readFileSync(path.join(historyDir, meta.runId, 'events.json')));
-  assert.equal(scopedEvents.events[0].id, `${meta.runId}:evt-001`);
-  assert.deepEqual(
-    JSON.parse(fs.readFileSync(path.join(historyDir, meta.runId, 'verification.json'))),
-    { version: 1, reviews: [] },
-  );
-});
+  fs.writeFileSync(verification, JSON.stringify({ version: 1, run_id: runId, reviews: [] }));
+  scopeEventsForRun(events, runId, events);
 
-test('scopes historical event IDs and verification paths to their run', () => {
-  const dir = tempDir('flyt-history-path-');
-  const historyDir = path.join(dir, 'history');
-  const runId = 'run-1234-abcd';
-  fs.mkdirSync(path.join(historyDir, runId), { recursive: true });
-  const source = path.join(dir, 'events.json');
-  const scoped = path.join(historyDir, runId, 'events.json');
-  const historyMeta = path.join(dir, 'history.json');
-  fs.writeFileSync(source, JSON.stringify({ events: [{ id: 'evt-001' }] }));
-  fs.writeFileSync(historyMeta, JSON.stringify({ runs: [{ runId }] }));
-  scopeEventsForHistory(source, runId, scoped);
-  assert.equal(JSON.parse(fs.readFileSync(scoped)).events[0].id, `${runId}:evt-001`);
+  const bundle = prepareRunHistoryBundle({
+    runId,
+    historyDir,
+    historyMetaPath,
+    historyIndexOutput,
+    filename: 'flies.mp4',
+    durationSec: 2.3,
+    fps: 30,
+    totalFrames: 4,
+    csvSrc: csv,
+    eventsSrc: events,
+    verificationSrc: verification,
+  });
+  assert.equal(bundle.meta.avgProximity, 20);
+  assert.equal(bundle.meta.detectedBouts, 1);
+  assert.equal(readCsvAvgProximity(csv), 20);
+  publishBundle(bundle.entries, 'history-token', { manifestDir: dir });
+
+  const scopedEvents = JSON.parse(fs.readFileSync(path.join(historyDir, runId, 'events.json')));
+  assert.equal(scopedEvents.events[0].id, `${runId}:evt-001`);
   assert.equal(
-    resolveVerificationPath(`${runId}:evt-001`, 'current.json', historyDir, historyMeta),
+    resolveVerificationPath(`${runId}:evt-001`, historyDir),
     path.join(historyDir, runId, 'verification.json'),
   );
+  assert.equal(verificationPathForRun(runId, historyDir), path.join(historyDir, runId, 'verification.json'));
+  assert.throws(() => resolveVerificationPath('evt-001', historyDir), /Run-scoped event ID required/);
 });
 
 test('termination escalates to SIGKILL and resolves only after close', async () => {

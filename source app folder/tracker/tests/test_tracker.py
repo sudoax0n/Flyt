@@ -9,7 +9,9 @@ assert spec.loader is not None
 spec.loader.exec_module(tracker)
 
 
-def row(frame, proximity, confidence=1.0, occlusion=0, area=100.0):
+def row(frame, proximity, confidence=1.0, occlusion=0, area=100.0, tracking_valid=None):
+    if tracking_valid is None:
+        tracking_valid = int(occlusion == 0 and area > 0)
     return {
         "frame": frame,
         "proximity_distance": proximity,
@@ -17,6 +19,7 @@ def row(frame, proximity, confidence=1.0, occlusion=0, area=100.0):
         "occlusion_flag": occlusion,
         "fly1_area": area,
         "fly2_area": area,
+        "tracking_valid": tracking_valid,
     }
 
 
@@ -56,11 +59,26 @@ class TrackerTests(unittest.TestCase):
         confidence = tracker.assignment_confidence((5, 0), (-5, 0), (0, 0), (0, 0))
         self.assertLess(confidence, tracker.LOW_CONFIDENCE_THRESHOLD)
 
-    def test_frame_sync_requires_expected_input_count_when_available(self):
+    def test_frame_sync_treats_opencv_count_as_diagnostic_only(self):
         self.assertTrue(tracker.frame_sync_ok(10, 10, 9, 10))
-        self.assertFalse(tracker.frame_sync_ok(8, 8, 7, 10))
+        self.assertTrue(tracker.frame_sync_ok(8, 8, 7, 10))
         self.assertTrue(tracker.frame_sync_ok(8, 8, 7, 0))
         self.assertFalse(tracker.frame_sync_ok(8, 7, 6, 8))
+
+    def test_invalid_tracking_observation_cannot_be_courtship(self):
+        invalid = row(0, proximity=10, confidence=1.0, tracking_valid=0)
+        self.assertFalse(tracker.is_courtship_frame(invalid, 60))
+        self.assertTrue(tracker.is_low_confidence_frame(invalid))
+
+    def test_event_mean_proximity_ignores_missing_values(self):
+        segment = [
+            row(0, proximity=20, confidence=0.8),
+            row(1, proximity=float("nan"), confidence=0.0, tracking_valid=0),
+        ]
+        event = tracker.build_event_record(
+            "evt-001", "low_confidence_segment", 0, 1, 30, segment, "test"
+        )
+        self.assertEqual(event["mean_proximity_px"], 20.0)
 
     def test_roi_validation(self):
         self.assertEqual(tracker.parse_roi("1,2,3,4"), (1, 2, 3, 4))

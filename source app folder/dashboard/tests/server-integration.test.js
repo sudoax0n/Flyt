@@ -38,8 +38,8 @@ function createGate({ releaseOnAbort = true } = {}) {
 function writeTrackerOutputs(outputs, frames = 4) {
   fs.writeFileSync(outputs.rawVideo, 'raw-video');
   fs.writeFileSync(outputs.csv, [
-    'frame,proximity_distance,occlusion_flag',
-    ...Array.from({ length: frames }, (_, index) => `${index},20,0`),
+    'frame,proximity_distance,occlusion_flag,tracking_valid,detection_count,fly1_area,fly2_area',
+    ...Array.from({ length: frames }, (_, index) => `${index},20,0,1,2,100,100`),
   ].join('\n'));
   fs.writeFileSync(outputs.events, JSON.stringify({
     fps: 30,
@@ -60,7 +60,6 @@ function standardServices(overrides = {}) {
       };
     },
     transcode: async (raw, final) => fs.copyFileSync(raw, final),
-    snapshot: () => null,
     ...overrides,
   };
 }
@@ -225,6 +224,9 @@ test('a complete run publishes only after every frame count agrees', async (t) =
   assert.equal(metadata.rawVideoFrames, 4);
   assert.equal(metadata.finalVideoFrames, 4);
   assert.equal(metadata.syncOk, true);
+  assert.match(metadata.runId, /^run-/);
+  const currentEvents = JSON.parse(fs.readFileSync(path.join(harness.paths.publicDir, 'events.json')));
+  assert.equal(currentEvents.events[0].id, `${metadata.runId}:evt-001`);
 });
 
 test('frame mismatch fails closed and preserves the previous published bundle', async (t) => {
@@ -260,4 +262,51 @@ test('destructive cross-origin requests are denied unless explicitly allowed', a
   });
   assert.equal(allowed.status, 200);
   assert.equal(allowed.headers.get('access-control-allow-origin'), 'http://localhost:5173');
+});
+
+
+test('a verdict made on the current run survives subsequent runs and history reload', async (t) => {
+  const harness = await createHarness(standardServices());
+  t.after(() => harness.close());
+
+  assert.equal((await upload(harness.baseUrl, 'first.mp4')).status, 200);
+  const firstStatus = await waitForStatus(harness.baseUrl, 'done');
+  const firstRunId = firstStatus.runId;
+  const eventsResponse = await fetch(`${harness.baseUrl}/api/events`);
+  const firstEvents = await eventsResponse.json();
+  const eventId = firstEvents.events[0].id;
+  assert.equal(eventId, `${firstRunId}:evt-001`);
+
+  const verdictResponse = await fetch(`${harness.baseUrl}/api/verification`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ eventId, verdict: 'confirmed' }),
+  });
+  assert.equal(verdictResponse.status, 200);
+
+  const unscopedResponse = await fetch(`${harness.baseUrl}/api/verification`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ eventId: 'evt-001', verdict: 'confirmed' }),
+  });
+  assert.equal(unscopedResponse.status, 400);
+
+  assert.equal((await upload(harness.baseUrl, 'second.mp4')).status, 200);
+  const secondStatus = await waitForStatus(harness.baseUrl, 'done');
+  assert.notEqual(secondStatus.runId, firstRunId);
+
+  const historicResponse = await fetch(
+    `${harness.baseUrl}/api/verification?runId=${encodeURIComponent(firstRunId)}`,
+  );
+  assert.equal(historicResponse.status, 200);
+  const historicVerification = await historicResponse.json();
+  assert.deepEqual(historicVerification.reviews.map((review) => ({
+    event_id: review.event_id,
+    verdict: review.verdict,
+  })), [{ event_id: eventId, verdict: 'confirmed' }]);
+
+  const canonical = JSON.parse(fs.readFileSync(
+    path.join(harness.paths.historyDir, firstRunId, 'verification.json'),
+  ));
+  assert.equal(canonical.reviews[0].verdict, 'confirmed');
 });

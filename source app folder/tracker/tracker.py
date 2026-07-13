@@ -74,7 +74,10 @@ def build_event_record(
 ) -> dict[str, Any]:
     effective_fps = fps if fps > 0 else 30.0
     duration_frames = end_frame - start_frame + 1
-    proximities = [value_or(row, "proximity_distance", 0.0) for row in segment]
+    proximities = [
+        value_or(row, "proximity_distance", math.nan) for row in segment
+        if math.isfinite(value_or(row, "proximity_distance", math.nan))
+    ]
     confidences = [value_or(row, "identity_confidence", 0.0) for row in segment]
     occlusions = [value_or(row, "occlusion_flag", 0.0) for row in segment]
     return {
@@ -98,8 +101,10 @@ def is_courtship_frame(row: dict[str, Any], proximity_threshold: float) -> bool:
     occluded = value_or(row, "occlusion_flag", 1.0) != 0.0
     fly1_present = value_or(row, "fly1_area", 0.0) > 0.0
     fly2_present = value_or(row, "fly2_area", 0.0) > 0.0
+    tracking_valid = value_or(row, "tracking_valid", 1.0) != 0.0
     return (
-        math.isfinite(proximity)
+        tracking_valid
+        and math.isfinite(proximity)
         and not occluded
         and fly1_present
         and fly2_present
@@ -110,7 +115,8 @@ def is_courtship_frame(row: dict[str, Any], proximity_threshold: float) -> bool:
 
 def is_low_confidence_frame(row: dict[str, Any]) -> bool:
     return (
-        value_or(row, "occlusion_flag", 0.0) != 0.0
+        value_or(row, "tracking_valid", 1.0) == 0.0
+        or value_or(row, "occlusion_flag", 0.0) != 0.0
         or value_or(row, "identity_confidence", 1.0) < LOW_CONFIDENCE_THRESHOLD
     )
 
@@ -200,10 +206,10 @@ def frame_sync_ok(
         csv_rows == frames_processed
         and (frames_processed == 0 or last_frame == frames_processed - 1)
     )
-    expected_sync_ok = (
-        expected_frame_count <= 0 or frames_processed == expected_frame_count
-    )
-    return internal_sync_ok and expected_sync_ok
+    # OpenCV CAP_PROP_FRAME_COUNT is diagnostic only. The server performs the
+    # authoritative full decode with ffmpeg and compares it to tracker/CSV/video output.
+    _ = expected_frame_count
+    return internal_sync_ok
 
 
 def parse_roi(value: str | None) -> tuple[int, int, int, int] | None:
@@ -239,7 +245,7 @@ def run_tracker(args: argparse.Namespace) -> int:
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = float(cap.get(cv2.CAP_PROP_FPS))
     effective_fps = fps if fps > 0 else 30.0
-    expected_frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    expected_frame_count = max(0, int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))
 
     out = None
     if not args.no_video:
@@ -300,10 +306,12 @@ def run_tracker(args: argparse.Namespace) -> int:
 
             f1_coords = f2_coords = (0, 0)
             f1_speed = f2_speed = 0.0
-            proximity = 0.0
+            proximity = math.nan
             occlusion_flag = 0
             identity_confidence = 0.0
             fly1_area = fly2_area = 0.0
+            detection_count = len(centroids)
+            tracking_valid = 0
 
             if len(centroids) == 2:
                 ca, cb = centroids
@@ -326,6 +334,7 @@ def run_tracker(args: argparse.Namespace) -> int:
                     f1_speed = displacement(prev_f1, f1_coords, was_initialized)
                     f2_speed = displacement(prev_f2, f2_coords, was_initialized)
                 proximity = float(math.dist(f1_coords, f2_coords))
+                tracking_valid = 1
                 prev_f1, prev_f2 = f1_coords, f2_coords
                 if out:
                     for x, y, w, h in bboxes:
@@ -371,8 +380,9 @@ def run_tracker(args: argparse.Namespace) -> int:
                         2,
                     )
             elif is_initialized:
+                # Coordinates are retained only for display continuity. Proximity is
+                # deliberately missing because no two-fly observation occurred.
                 f1_coords, f2_coords = prev_f1, prev_f2
-                proximity = float(math.dist(f1_coords, f2_coords))
                 identity_confidence = 0.0
 
             data.append({
@@ -387,6 +397,8 @@ def run_tracker(args: argparse.Namespace) -> int:
                 "fly2_speed_pxsec": round(f2_speed * effective_fps, 4),
                 "activity_level": activity_level,
                 "proximity_distance": proximity,
+                "tracking_valid": tracking_valid,
+                "detection_count": detection_count,
                 "occlusion_flag": occlusion_flag,
                 "identity_confidence": round(identity_confidence, 4),
                 "fly1_area": fly1_area,
@@ -422,7 +434,7 @@ def run_tracker(args: argparse.Namespace) -> int:
     )
     if not sync_ok:
         print(
-            "Error: frame integrity mismatch between decoded input, tracker loop, and CSV",
+            "Error: frame integrity mismatch between tracker loop and CSV",
             file=sys.stderr,
         )
         return 2

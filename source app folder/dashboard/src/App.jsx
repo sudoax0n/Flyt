@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Papa from 'papaparse';
+import { prismDistance, proximityValue } from './metrics.js';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, 
   ScatterChart, Scatter, ZAxis
@@ -66,7 +67,7 @@ function exportPrismCsv(rows, fps) {
     const t = Number(r.frame) / effectiveFps;
     const v1 = Number(r.fly1_speed_pxsec ?? r.fly1_speed ?? 0);
     const v2 = Number(r.fly2_speed_pxsec ?? r.fly2_speed ?? 0);
-    const dist = Number(r.proximity_distance ?? 0);
+    const dist = prismDistance(r);
     lines.push([t, v1, v2, dist].map(csvEscape).join(','));
   });
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
@@ -720,9 +721,11 @@ function App() {
         const hmData = [];
 
         parsedData.forEach((row, i) => {
-          // Average proximity only over frames where flies are separate (exclude merged/occluded where proximity=0 by design)
-          if (row.proximity_distance != null && !row.occlusion_flag) {
-            totalProx += row.proximity_distance;
+          // Only measured two-fly observations contribute. Dropouts retain
+          // display coordinates but carry no scientifically valid proximity.
+          const observedProximity = proximityValue(row);
+          if (observedProximity !== null) {
+            totalProx += observedProximity;
             proxCount++;
           }
           if (row.activity_level > maxAct) maxAct = row.activity_level;

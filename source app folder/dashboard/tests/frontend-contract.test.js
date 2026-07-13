@@ -20,3 +20,11 @@ test('historic runs display their recorded timestamp rather than load time', () 
   assert.match(source, /setRunTimestamp\(run\.timestamp \|\| null\)/);
   assert.match(source, /loadHistoricRun\(run\)/);
 });
+
+
+test('dashboard and Prism export use validity-aware proximity helpers', () => {
+  const source = appSource();
+  assert.match(source, /proximityValue\(row\)/);
+  assert.match(source, /prismDistance\(r\)/);
+  assert.doesNotMatch(source, /Number\(r\.proximity_distance \?\? 0\)/);
+});

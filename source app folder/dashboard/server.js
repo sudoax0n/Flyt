@@ -9,19 +9,22 @@ import { fileURLToPath } from 'url';
 import {
   AbortRunError,
   buildTrackerArgs,
+  createRunId,
   countCsvRows,
   ensureDir,
   getVideoFrameCount,
   parseTrackerSync,
+  prepareRunHistoryBundle,
   publishBundle,
   readEventsFps,
   readJson,
   recoverPublishArtifacts,
   resolveVerificationPath,
+  scopeEventsForRun,
   runCommand,
   safeRemoveDir,
   safeUnlink,
-  snapshotRunToHistory,
+  verificationPathForRun,
   terminateChild,
   transcodeVideo,
   validateFrameIntegrity,
@@ -111,7 +114,6 @@ export function createFlytServer(options = {}) {
     return next();
   });
 
-  let runSequence = 0;
   let epoch = 0;
   let uploadReserved = false;
   let terminating = false;
@@ -160,8 +162,10 @@ export function createFlytServer(options = {}) {
         killOptions,
       },
     )),
-    publish: options.services?.publish || ((entries, token) => publishBundle(entries, token)),
-    snapshot: options.services?.snapshot || snapshotRunToHistory,
+    publish: options.services?.publish || ((entries, token) => publishBundle(
+      entries, token, { manifestDir: publicDir },
+    )),
+    prepareHistory: options.services?.prepareHistory || prepareRunHistoryBundle,
   };
 
   const isBusy = () => (
@@ -193,7 +197,7 @@ export function createFlytServer(options = {}) {
     return next();
   }
 
-  function readVerification(filePath = verificationPath) {
+  function readVerification(filePath) {
     const data = readJson(filePath, { version: 1, reviews: [] });
     return Array.isArray(data.reviews) ? data : { version: 1, reviews: [] };
   }
@@ -227,7 +231,7 @@ export function createFlytServer(options = {}) {
   }
 
   function createRunContext(inputPath, filename, overrides) {
-    const runId = ++runSequence;
+    const runId = createRunId();
     const runEpoch = epoch;
     const token = `${runId}-${runEpoch}-${randomUUID()}`;
     const workDir = path.join(uploadsDir, `run-${token}`);
@@ -255,6 +259,7 @@ export function createFlytServer(options = {}) {
       events: path.join(context.workDir, 'events.json'),
       metadata: path.join(context.workDir, 'run_metadata.json'),
       verification: path.join(context.workDir, 'verification.json'),
+      historyIndex: path.join(context.workDir, 'history.json'),
     };
     const ensureCurrent = () => {
       if (!isCurrent(context)) throw new AbortRunError();
@@ -305,40 +310,40 @@ export function createFlytServer(options = {}) {
         finalVideoFrames,
       });
       const fps = readEventsFps(outputs.events);
+      scopeEventsForRun(outputs.events, context.runId, outputs.events);
       const metadata = {
         ...integrity,
+        runId: context.runId,
         expectedVideoFrames: syncInfo.expectedVideoFrames,
         fps,
         timestamp: new Date().toISOString(),
       };
       writeJson(outputs.metadata, metadata);
-      writeJson(outputs.verification, { version: 1, reviews: [] });
+      writeJson(outputs.verification, { version: 1, run_id: context.runId, reviews: [] });
+      const historyBundle = services.prepareHistory({
+        runId: context.runId,
+        historyDir,
+        historyMetaPath,
+        historyIndexOutput: outputs.historyIndex,
+        filename: context.filename,
+        durationSec: (Date.now() - context.startedAt) / 1000,
+        fps,
+        totalFrames: integrity.inputFrames,
+        csvSrc: outputs.csv,
+        eventsSrc: outputs.events,
+        verificationSrc: outputs.verification,
+      });
       ensureCurrent();
 
-      job.progress = 'Publishing validated results...';
+      job.progress = 'Publishing validated current and historical results...';
       services.publish([
         { source: outputs.csv, destination: path.join(publicDir, 'data.csv') },
         { source: outputs.events, destination: path.join(publicDir, 'events.json') },
         { source: outputs.browserVideo, destination: path.join(publicDir, 'tracked.mp4') },
         { source: outputs.metadata, destination: path.join(publicDir, 'run_metadata.json') },
-        { source: outputs.verification, destination: verificationPath },
+        ...historyBundle.entries,
       ], context.token);
       ensureCurrent();
-
-      try {
-        services.snapshot({
-          historyDir,
-          historyMetaPath,
-          filename: context.filename,
-          durationSec: (Date.now() - context.startedAt) / 1000,
-          fps,
-          totalFrames: integrity.inputFrames,
-          csvSrc: outputs.csv,
-          eventsSrc: outputs.events,
-        });
-      } catch (historyError) {
-        console.error(`[Server] History snapshot failed: ${historyError.message}`);
-      }
 
       job = {
         ...job,
@@ -411,12 +416,18 @@ export function createFlytServer(options = {}) {
     return res.json(data);
   });
 
+  function currentRunId() {
+    return readJson(path.join(publicDir, 'run_metadata.json'), null)?.runId || null;
+  }
+
   app.get('/api/verification', (req, res) => {
-    if (!req.query.runId) return res.json(readVerification());
-    const history = readJson(historyMetaPath, { runs: [] });
-    const known = history.runs?.some((run) => run.runId === req.query.runId);
-    if (!known) return res.status(404).json({ error: 'Run not found' });
-    return res.json(readVerification(path.join(historyDir, req.query.runId, 'verification.json')));
+    const runId = req.query.runId || currentRunId();
+    if (!runId) return res.status(404).json({ error: 'No current run found' });
+    try {
+      return res.json(readVerification(verificationPathForRun(runId, historyDir)));
+    } catch (error) {
+      return res.status(404).json({ error: error.message });
+    }
   });
 
   app.post('/api/verification', (req, res) => {
@@ -425,12 +436,7 @@ export function createFlytServer(options = {}) {
       return res.status(400).json({ error: 'Body must include eventId and verdict.' });
     }
     try {
-      const filePath = resolveVerificationPath(
-        eventId,
-        verificationPath,
-        historyDir,
-        historyMetaPath,
-      );
+      const filePath = resolveVerificationPath(eventId, historyDir);
       const data = readVerification(filePath);
       const review = { event_id: eventId, verdict, reviewed_at: new Date().toISOString() };
       const index = data.reviews.findIndex((item) => item.event_id === eventId);
@@ -443,9 +449,15 @@ export function createFlytServer(options = {}) {
     }
   });
 
-  app.post('/api/verification/reset', (_req, res) => {
-    writeJson(verificationPath, { version: 1, reviews: [] });
-    res.json({ success: true });
+  app.post('/api/verification/reset', (req, res) => {
+    const runId = req.body?.runId || currentRunId();
+    if (!runId) return res.status(404).json({ error: 'No current run found' });
+    try {
+      writeJson(verificationPathForRun(runId, historyDir), { version: 1, run_id: runId, reviews: [] });
+      return res.json({ success: true });
+    } catch (error) {
+      return res.status(404).json({ error: error.message });
+    }
   });
 
   app.get('/api/history', (_req, res) => {
