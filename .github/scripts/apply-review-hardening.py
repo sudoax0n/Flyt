@@ -1,7 +1,7 @@
 from pathlib import Path
 
 app_path = Path("source app folder/dashboard/src/App.jsx")
-source = app_path.read_text(encoding="utf-8")
+app_source = app_path.read_text(encoding="utf-8")
 
 old_verification = """    if (!runId) {
       try {
@@ -29,7 +29,7 @@ new_verification = """    try {
     } catch { /* keep empty reviews */ }
 """
 
-replacements = [
+app_replacements = [
     (old_verification, new_verification),
     (
         "  const loadHistoricRun = async (runId) => {\n",
@@ -45,11 +45,33 @@ replacements = [
     ),
 ]
 
-for old, new in replacements:
-    count = source.count(old)
+for old, new in app_replacements:
+    count = app_source.count(old)
     if count != 1:
-        raise RuntimeError(f"Expected one occurrence, found {count}: {old[:80]!r}")
-    source = source.replace(old, new, 1)
+        raise RuntimeError(f"Expected one App.jsx occurrence, found {count}: {old[:80]!r}")
+    app_source = app_source.replace(old, new, 1)
 
-app_path.write_text(source, encoding="utf-8")
-print("Applied historic verification and timestamp integration patches.")
+app_path.write_text(app_source, encoding="utf-8")
+
+server_path = Path("source app folder/dashboard/server.js")
+server_source = server_path.read_text(encoding="utf-8")
+server_replacements = [
+    (
+        "    runTracker: options.services?.runTracker || async (inputPath, outputs, overrides, context) => runCommand(\n",
+        "    runTracker: options.services?.runTracker || ((inputPath, outputs, overrides, context) => runCommand(\n",
+    ),
+    (
+        "        onStderr: (text) => console.error(`[Tracker] ${text.trim()}`),\n      },\n    ),\n    transcode:",
+        "        onStderr: (text) => console.error(`[Tracker] ${text.trim()}`),\n      },\n    )),\n    transcode:",
+    ),
+]
+
+for old, new in server_replacements:
+    count = server_source.count(old)
+    if count != 1:
+        raise RuntimeError(f"Expected one server.js occurrence, found {count}: {old[:80]!r}")
+    server_source = server_source.replace(old, new, 1)
+
+server_path.write_text(server_source, encoding="utf-8")
+Path(".github/eslint-diagnostics.json").unlink(missing_ok=True)
+print("Applied frontend integration and server parser hardening patches.")
