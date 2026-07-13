@@ -669,9 +669,7 @@ function App() {
     setEvents(eventList);
     setReviewsByEventId(reviews);
     setStats((prev) => {
-      const { detected, verified } = runId
-        ? { detected: eventList.filter((e) => e.type === 'courtship_bout').length, verified: 0 }
-        : computeCourtshipStats(eventList, reviews);
+      const { detected, verified } = computeCourtshipStats(eventList, reviews);
       return { ...prev, courtshipDetected: detected, courtshipVerified: verified };
     });
     return { fps, frames };
