@@ -1,57 +1,45 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 330" role="img" aria-labelledby="title desc">
   <title id="title">Flyt tracking pipeline</title>
-  <desc id="desc">Five stages from video input through deterministic tracking, event detection, human validation, and research export.</desc>
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#11172A"/><stop offset="1" stop-color="#080B13"/></linearGradient>
-    <linearGradient id="violet" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#B79BFF"/><stop offset="1" stop-color="#6E48FF"/></linearGradient>
-    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#7CE9FF"/><stop offset="1" stop-color="#339BFF"/></linearGradient>
-  </defs>
-  <rect width="1200" height="330" rx="28" fill="#080B13"/>
-  <text x="52" y="58" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="26" font-weight="750">A transparent path from pixels to evidence</text>
-  <text x="52" y="88" fill="#8F9AB1" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15">Every stage stays inspectable; no black-box model is required for the baseline workflow.</text>
-  <path d="M216 205H260M446 205H490M676 205H720M906 205H950" stroke="#546078" stroke-width="4" stroke-linecap="round"/>
-  <path d="M251 197L263 205L251 213M481 197L493 205L481 213M711 197L723 205L711 213M941 197L953 205L941 213" fill="none" stroke="#7C88A3" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-  <g transform="translate(50 126)">
-    <rect width="166" height="150" rx="20" fill="url(#bg)" stroke="#4F5A71" stroke-opacity=".55"/>
-    <rect x="22" y="24" width="68" height="50" rx="10" fill="#151C2F" stroke="#6F7A92"/>
-    <path d="M90 38L119 27V70L90 59Z" fill="#5EDBFF"/>
-    <circle cx="46" cy="49" r="8" fill="#8D70FF"/><circle cx="67" cy="58" r="7" fill="#56D9FF"/>
-    <text x="22" y="105" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="700">1. Video input</text>
-    <text x="22" y="128" fill="#8F9AB1" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12">Two-fly assay</text>
-  </g>
-  <g transform="translate(280 126)">
-    <rect width="166" height="150" rx="20" fill="url(#bg)" stroke="#4F5A71" stroke-opacity=".55"/>
-    <rect x="24" y="22" width="70" height="58" rx="12" fill="#101625" stroke="#6D7890"/>
-    <path d="M34 66C48 39 62 71 83 35" fill="none" stroke="#8C70FF" stroke-width="4"/>
-    <circle cx="83" cy="35" r="7" fill="#8C70FF"/>
-    <path d="M104 28H141M104 44H134M104 60H127" stroke="#4ED8FF" stroke-width="5" stroke-linecap="round"/>
-    <text x="22" y="105" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="700">2. Track</text>
-    <text x="22" y="128" fill="#8F9AB1" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12">Deterministic CV</text>
-  </g>
-  <g transform="translate(510 126)">
-    <rect width="166" height="150" rx="20" fill="url(#bg)" stroke="#4F5A71" stroke-opacity=".55"/>
-    <rect x="22" y="24" width="122" height="14" rx="7" fill="#232B3F"/><rect x="22" y="24" width="80" height="14" rx="7" fill="url(#violet)"/>
-    <rect x="22" y="50" width="122" height="14" rx="7" fill="#232B3F"/><rect x="22" y="50" width="104" height="14" rx="7" fill="url(#cyan)"/>
-    <circle cx="128" cy="83" r="8" fill="#F3C96B"/>
-    <text x="22" y="105" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="700">3. Detect events</text>
-    <text x="22" y="128" fill="#8F9AB1" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12">Candidate bouts</text>
-  </g>
-  <g transform="translate(740 126)">
-    <rect width="166" height="150" rx="20" fill="url(#bg)" stroke="#4F5A71" stroke-opacity=".55"/>
-    <circle cx="56" cy="48" r="23" fill="#173A2B"/>
-    <path d="M45 48L53 56L68 39" fill="none" stroke="#6EE7B7" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="112" cy="48" r="23" fill="#3A1D2A"/>
-    <path d="M103 39L121 57M121 39L103 57" stroke="#FF8190" stroke-width="5" stroke-linecap="round"/>
-    <text x="22" y="105" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="700">4. Verify</text>
-    <text x="22" y="128" fill="#8F9AB1" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12">Researcher review</text>
-  </g>
-  <g transform="translate(970 126)">
-    <rect width="180" height="150" rx="20" fill="url(#bg)" stroke="#4F5A71" stroke-opacity=".55"/>
-    <path d="M29 26H91L111 46V82H29Z" fill="#11192A" stroke="#6F7A92"/>
-    <path d="M91 26V46H111" fill="none" stroke="#6F7A92"/>
-    <path d="M43 60H93M43 72H82" stroke="#58DAFF" stroke-width="4" stroke-linecap="round"/>
-    <path d="M127 31V73M113 59L127 73L141 59" fill="none" stroke="#8F72FF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="22" y="105" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="700">5. Export</text>
-    <text x="22" y="128" fill="#8F9AB1" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12">CSV · Prism · PDF</text>
+  <desc id="desc">Five inspectable stages from video input through tracking, candidate detection, researcher verification, and export.</desc>
+  <rect x="1" y="1" width="1198" height="328" rx="18" fill="#FBFBFA" stroke="#E8E7E3" stroke-width="2"/>
+  <text x="48" y="50" fill="#252523" font-family="Georgia,Times New Roman,serif" font-size="27">From recording to research export</text>
+  <text x="48" y="78" fill="#74736E" font-family="Helvetica Neue,Arial,sans-serif" font-size="14">Each stage remains visible and inspectable.</text>
+  <path d="M74 116H1128" stroke="#E8E7E3" stroke-width="2"/>
+  <g font-family="Helvetica Neue,Arial,sans-serif">
+    <g transform="translate(48 105)">
+      <circle cx="26" cy="11" r="10" fill="#252523"/><text x="23" y="15" fill="#FFFFFF" font-size="10" font-weight="700">1</text>
+      <rect y="40" width="190" height="150" rx="8" fill="#FFFFFF" stroke="#E8E7E3"/>
+      <rect x="22" y="63" width="72" height="50" rx="6" fill="#E8F2F8" stroke="#246486"/><path d="M94 76L122 66V109L94 99Z" fill="#246486"/>
+      <circle cx="47" cy="87" r="6" fill="#246486"/><circle cx="68" cy="96" r="5" fill="#346538"/>
+      <text x="22" y="141" fill="#252523" font-size="14" font-weight="600">Video input</text><text x="22" y="164" fill="#74736E" font-size="11">Two-fly assay</text>
+    </g>
+    <g transform="translate(280 105)">
+      <circle cx="26" cy="11" r="10" fill="#252523"/><text x="23" y="15" fill="#FFFFFF" font-size="10" font-weight="700">2</text>
+      <rect y="40" width="190" height="150" rx="8" fill="#FFFFFF" stroke="#E8E7E3"/>
+      <path d="M24 105C48 66 69 111 104 62" fill="none" stroke="#246486" stroke-width="3"/><circle cx="104" cy="62" r="6" fill="#E8F2F8" stroke="#246486" stroke-width="2"/>
+      <path d="M126 68H164M126 85H157M126 102H149" stroke="#A3A19B" stroke-width="4" stroke-linecap="round"/>
+      <text x="22" y="141" fill="#252523" font-size="14" font-weight="600">Track</text><text x="22" y="164" fill="#74736E" font-size="11">Deterministic OpenCV</text>
+    </g>
+    <g transform="translate(512 105)">
+      <circle cx="26" cy="11" r="10" fill="#252523"/><text x="23" y="15" fill="#FFFFFF" font-size="10" font-weight="700">3</text>
+      <rect y="40" width="190" height="150" rx="8" fill="#FFFFFF" stroke="#E8E7E3"/>
+      <rect x="22" y="65" width="146" height="12" rx="3" fill="#E8F2F8"/><rect x="22" y="65" width="92" height="12" rx="3" fill="#B9D7E7"/>
+      <rect x="22" y="89" width="146" height="12" rx="3" fill="#FBF3DB"/><rect x="22" y="89" width="124" height="12" rx="3" fill="#E7CF91"/>
+      <text x="22" y="141" fill="#252523" font-size="14" font-weight="600">Detect candidates</text><text x="22" y="164" fill="#74736E" font-size="11">Events and uncertainty</text>
+    </g>
+    <g transform="translate(744 105)">
+      <circle cx="26" cy="11" r="10" fill="#252523"/><text x="23" y="15" fill="#FFFFFF" font-size="10" font-weight="700">4</text>
+      <rect y="40" width="190" height="150" rx="8" fill="#FFFFFF" stroke="#E8E7E3"/>
+      <rect x="22" y="65" width="64" height="42" rx="5" fill="#EDF3EC"/><path d="M39 86L47 94L66 75" fill="none" stroke="#346538" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="100" y="65" width="64" height="42" rx="5" fill="#FBEAEC"/><path d="M120 76L144 98M144 76L120 98" stroke="#983A3A" stroke-width="4" stroke-linecap="round"/>
+      <text x="22" y="141" fill="#252523" font-size="14" font-weight="600">Verify</text><text x="22" y="164" fill="#74736E" font-size="11">Researcher decision</text>
+    </g>
+    <g transform="translate(976 105)">
+      <circle cx="26" cy="11" r="10" fill="#252523"/><text x="23" y="15" fill="#FFFFFF" font-size="10" font-weight="700">5</text>
+      <rect y="40" width="176" height="150" rx="8" fill="#FFFFFF" stroke="#E8E7E3"/>
+      <path d="M24 63H88L108 83V113H24Z" fill="#FBFBFA" stroke="#74736E"/><path d="M88 63V83H108" fill="none" stroke="#74736E"/><path d="M39 94H90M39 105H78" stroke="#246486" stroke-width="3" stroke-linecap="round"/>
+      <path d="M132 68V106M120 94L132 106L144 94" fill="none" stroke="#252523" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="22" y="141" fill="#252523" font-size="14" font-weight="600">Export</text><text x="22" y="164" fill="#74736E" font-size="11">CSV  /  Prism  /  PDF</text>
+    </g>
   </g>
 </svg>

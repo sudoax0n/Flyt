@@ -1,54 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
-  <title id="title">Flyt logo</title>
-  <desc id="desc">A luminous stylized fruit fly with data trajectory nodes on a dark rounded square.</desc>
-  <defs>
-    <linearGradient id="bg" x1="70" y1="55" x2="440" y2="465" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#151B31"/>
-      <stop offset="1" stop-color="#070A12"/>
-    </linearGradient>
-    <linearGradient id="body" x1="210" y1="125" x2="300" y2="435" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#B89CFF"/>
-      <stop offset=".48" stop-color="#875BFF"/>
-      <stop offset="1" stop-color="#5B35D5"/>
-    </linearGradient>
-    <linearGradient id="wingL" x1="94" y1="168" x2="235" y2="309" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#75E7FF" stop-opacity=".92"/>
-      <stop offset="1" stop-color="#3A8BFF" stop-opacity=".18"/>
-    </linearGradient>
-    <linearGradient id="wingR" x1="418" y1="168" x2="277" y2="309" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#75E7FF" stop-opacity=".92"/>
-      <stop offset="1" stop-color="#3A8BFF" stop-opacity=".18"/>
-    </linearGradient>
-    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
-      <feGaussianBlur stdDeviation="10" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-  </defs>
-
-  <rect x="16" y="16" width="480" height="480" rx="128" fill="url(#bg)"/>
-  <rect x="17" y="17" width="478" height="478" rx="127" fill="none" stroke="#7D6AFF" stroke-opacity=".28" stroke-width="2"/>
-
-  <path d="M117 361C75 306 82 219 136 155" fill="none" stroke="#46D7FF" stroke-opacity=".45" stroke-width="8" stroke-linecap="round" stroke-dasharray="2 22"/>
-  <circle cx="116" cy="361" r="12" fill="#46D7FF" filter="url(#glow)"/>
-  <circle cx="136" cy="155" r="9" fill="#9C7CFF" filter="url(#glow)"/>
-
-  <path d="M225 225C172 154 104 160 92 228C82 289 137 337 221 286Z" fill="url(#wingL)" stroke="#79DFFF" stroke-opacity=".75" stroke-width="5"/>
-  <path d="M287 225C340 154 408 160 420 228C430 289 375 337 291 286Z" fill="url(#wingR)" stroke="#79DFFF" stroke-opacity=".75" stroke-width="5"/>
-  <path d="M214 244C168 218 131 217 107 240" fill="none" stroke="#D5F8FF" stroke-opacity=".35" stroke-width="4"/>
-  <path d="M298 244C344 218 381 217 405 240" fill="none" stroke="#D5F8FF" stroke-opacity=".35" stroke-width="4"/>
-
-  <path d="M229 155L207 112" stroke="#A58CFF" stroke-width="9" stroke-linecap="round"/>
-  <path d="M283 155L305 112" stroke="#A58CFF" stroke-width="9" stroke-linecap="round"/>
-  <circle cx="204" cy="106" r="9" fill="#62DFFF"/>
-  <circle cx="308" cy="106" r="9" fill="#62DFFF"/>
-
-  <circle cx="256" cy="173" r="49" fill="url(#body)" stroke="#D2C4FF" stroke-opacity=".55" stroke-width="5"/>
-  <rect x="216" y="207" width="80" height="106" rx="38" fill="url(#body)"/>
-  <path d="M256 293C210 293 205 348 222 407C230 437 245 452 256 452C267 452 282 437 290 407C307 348 302 293 256 293Z" fill="url(#body)"/>
-  <path d="M224 350H288M222 389H290M233 426H279" stroke="#D7CCFF" stroke-opacity=".35" stroke-width="8" stroke-linecap="round"/>
-
-  <path d="M220 279L165 333M292 279L347 333M222 305L178 384M290 305L334 384" stroke="#8966FF" stroke-width="9" stroke-linecap="round"/>
-  <circle cx="256" cy="173" r="18" fill="#0B1020" opacity=".9"/>
-  <circle cx="241" cy="166" r="5" fill="#7CE9FF"/>
-  <circle cx="271" cy="166" r="5" fill="#7CE9FF"/>
+  <title id="title">Flyt mark</title>
+  <desc id="desc">A restrained ink drawing of a fruit fly and measured trajectory.</desc>
+  <rect x="16" y="16" width="480" height="480" rx="92" fill="#FBFBFA" stroke="#E8E7E3" stroke-width="4"/>
+  <path d="M82 390C105 329 91 267 132 211C157 176 187 158 220 153" fill="none" stroke="#A3A19B" stroke-width="7" stroke-linecap="round" stroke-dasharray="2 19"/>
+  <circle cx="82" cy="390" r="10" fill="#346538"/><circle cx="132" cy="211" r="7" fill="#246486"/>
+  <path d="M229 224C188 157 117 160 103 225C91 281 145 324 224 283Z" fill="#E8F2F8" stroke="#246486" stroke-width="7" stroke-linejoin="round"/>
+  <path d="M283 224C324 157 395 160 409 225C421 281 367 324 288 283Z" fill="#EDF3EC" stroke="#346538" stroke-width="7" stroke-linejoin="round"/>
+  <path d="M216 249C173 224 138 226 114 244M296 249C339 224 374 226 398 244" fill="none" stroke="#A3A19B" stroke-width="4" stroke-linecap="round"/>
+  <path d="M230 166L208 121M282 166L304 121" stroke="#252523" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="205" cy="115" r="8" fill="#252523"/><circle cx="307" cy="115" r="8" fill="#252523"/>
+  <circle cx="256" cy="184" r="46" fill="#252523"/><rect x="220" y="216" width="72" height="100" rx="34" fill="#252523"/>
+  <path d="M256 296C215 296 211 346 225 404C232 433 246 448 256 448C266 448 280 433 287 404C301 346 297 296 256 296Z" fill="#252523"/>
+  <path d="M229 351H283M228 385H284M236 416H276" stroke="#FBFBFA" stroke-opacity=".72" stroke-width="6" stroke-linecap="round"/>
+  <path d="M224 282L169 337M288 282L343 337M226 309L184 386M286 309L328 386" stroke="#252523" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="242" cy="178" r="4" fill="#FBFBFA"/><circle cx="270" cy="178" r="4" fill="#FBFBFA"/>
 </svg>

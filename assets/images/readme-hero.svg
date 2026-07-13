@@ -1,67 +1,61 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
-  <title id="title">Flyt product overview</title>
-  <desc id="desc">A dark scientific dashboard illustration showing two tracked fruit flies, trajectories, behavioral charts, and validated outputs.</desc>
-  <defs>
-    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#151B31"/><stop offset="1" stop-color="#080B14"/></linearGradient>
-    <linearGradient id="violet" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#B89CFF"/><stop offset="1" stop-color="#6E48FF"/></linearGradient>
-    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#7CE9FF"/><stop offset="1" stop-color="#359BFF"/></linearGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="18" stdDeviation="28" flood-color="#02040A" flood-opacity=".6"/></filter>
-    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="8" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-  </defs>
-  <rect width="1200" height="520" rx="32" fill="#070A12"/>
-  <circle cx="134" cy="22" r="250" fill="#6E48FF" opacity=".14"/>
-  <circle cx="1110" cy="475" r="300" fill="#29B6F6" opacity=".10"/>
-  <path d="M0 425C180 365 270 470 445 401C620 333 757 421 1200 315" fill="none" stroke="#8B6DFF" stroke-opacity=".09" stroke-width="2"/>
-  <g transform="translate(62 58)">
-    <rect width="80" height="80" rx="24" fill="url(#panel)" stroke="#8B72FF" stroke-opacity=".45"/>
-    <path d="M36 36C24 20 10 22 9 37C8 51 21 61 36 50Z" fill="#63DFFF" fill-opacity=".62"/>
-    <path d="M44 36C56 20 70 22 71 37C72 51 59 61 44 50Z" fill="#63DFFF" fill-opacity=".62"/>
-    <circle cx="40" cy="31" r="8" fill="#A78BFA"/>
-    <rect x="34" y="39" width="12" height="20" rx="6" fill="#8B5CF6"/>
-    <path d="M40 56C31 56 32 69 40 72C48 69 49 56 40 56Z" fill="#6D45E8"/>
+  <title id="title">Flyt tracking workspace</title>
+  <desc id="desc">A light research workspace showing a completed two-fly tracking record, synchronized observation, validity, and review notes.</desc>
+  <rect x="1" y="1" width="1198" height="518" rx="18" fill="#FBFBFA" stroke="#E8E7E3" stroke-width="2"/>
+  <path d="M48 76H1152" stroke="#E8E7E3"/>
+  <g transform="translate(48 25)">
+    <rect width="34" height="34" rx="7" fill="#FFFFFF" stroke="#E8E7E3"/>
+    <path d="M15 16C12 11 7 12 7 16C7 21 11 23 15 20ZM19 16C22 11 27 12 27 16C27 21 23 23 19 20Z" fill="#E8F2F8" stroke="#252523" stroke-width="1.3"/>
+    <circle cx="17" cy="14" r="3.4" fill="#252523"/><path d="M17 17V26" stroke="#252523" stroke-width="4" stroke-linecap="round"/>
+    <text x="47" y="24" fill="#252523" font-family="Helvetica Neue,Arial,sans-serif" font-size="17" font-weight="700">Flyt</text>
   </g>
-  <text x="166" y="96" fill="#F6F3FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="54" font-weight="800" letter-spacing="-2">Flyt</text>
-  <text x="64" y="177" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="41" font-weight="750" letter-spacing="-1.4">From video to verified</text>
-  <text x="64" y="224" fill="url(#cyan)" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="41" font-weight="750" letter-spacing="-1.4">behavioral evidence.</text>
-  <text x="64" y="278" fill="#AAB2C9" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="19">Deterministic, CPU-first tracking for two-fly assays.</text>
-  <text x="64" y="307" fill="#AAB2C9" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="19">Local processing. Human-verified events. Reproducible exports.</text>
-  <g transform="translate(64 357)">
-    <rect width="150" height="44" rx="22" fill="#151A2A" stroke="#7E65FF" stroke-opacity=".45"/>
-    <circle cx="23" cy="22" r="6" fill="#8D72FF"/>
-    <text x="39" y="28" fill="#EAE5FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14" font-weight="650">OpenCV core</text>
-    <rect x="164" width="160" height="44" rx="22" fill="#151A2A" stroke="#47CCFF" stroke-opacity=".38"/>
-    <circle cx="187" cy="22" r="6" fill="#55D9FF"/>
-    <text x="203" y="28" fill="#E8FAFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14" font-weight="650">Local-first</text>
-    <rect x="338" width="190" height="44" rx="22" fill="#151A2A" stroke="#65E6B2" stroke-opacity=".34"/>
-    <circle cx="361" cy="22" r="6" fill="#64E7B4"/>
-    <text x="377" y="28" fill="#EDFFF7" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14" font-weight="650">Human validation</text>
+  <g fill="#74736E" font-family="Helvetica Neue,Arial,sans-serif" font-size="12">
+    <text x="830" y="47">Overview</text><text x="910" y="47">New run</text><text x="986" y="47">Review</text><text x="1053" y="47">History</text>
   </g>
-  <g transform="translate(610 54)" filter="url(#shadow)">
-    <rect width="530" height="412" rx="26" fill="url(#panel)" stroke="#76809A" stroke-opacity=".26"/>
-    <rect x="24" y="22" width="482" height="46" rx="14" fill="#0E1322"/>
-    <circle cx="48" cy="45" r="7" fill="#FF7B86"/><circle cx="70" cy="45" r="7" fill="#F3C96B"/><circle cx="92" cy="45" r="7" fill="#6EE7B7"/>
-    <text x="128" y="51" fill="#C9D0E3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="600">tracking-session-024</text>
-    <rect x="24" y="86" width="278" height="210" rx="18" fill="#080B13" stroke="#58637A" stroke-opacity=".26"/>
-    <rect x="48" y="106" width="230" height="170" rx="18" fill="#111827" stroke="#91A0BC" stroke-opacity=".28"/>
-    <path d="M78 248C100 210 128 226 148 190C169 152 198 196 224 143C240 113 258 142 269 121" fill="none" stroke="#8D70FF" stroke-width="5" stroke-linecap="round"/>
-    <path d="M76 133C115 146 111 189 157 203C198 216 206 252 269 252" fill="none" stroke="#49D3FF" stroke-width="5" stroke-linecap="round"/>
-    <circle cx="224" cy="143" r="10" fill="#9C7CFF" filter="url(#glow)"/>
-    <circle cx="157" cy="203" r="10" fill="#55DAFF" filter="url(#glow)"/>
-    <text x="62" y="126" fill="#8A95AE" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11">ROI / trajectory overlay</text>
-    <rect x="320" y="86" width="186" height="98" rx="18" fill="#0E1322"/>
-    <text x="340" y="112" fill="#8F9AB1" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11">INTER-FLY DISTANCE</text>
-    <text x="340" y="148" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="31" font-weight="750">42.8 px</text>
-    <path d="M340 166L365 155L388 160L412 136L438 142L463 119L486 125" fill="none" stroke="#55D9FF" stroke-width="3" stroke-linecap="round"/>
-    <rect x="320" y="198" width="186" height="98" rx="18" fill="#0E1322"/>
-    <text x="340" y="224" fill="#8F9AB1" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11">IDENTITY CONFIDENCE</text>
-    <text x="340" y="260" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="31" font-weight="750">0.94</text>
-    <rect x="340" y="274" width="142" height="7" rx="4" fill="#242B3D"/><rect x="340" y="274" width="132" height="7" rx="4" fill="url(#violet)"/>
-    <rect x="24" y="316" width="482" height="70" rx="18" fill="#0E1322"/>
-    <circle cx="55" cy="351" r="14" fill="#183829"/>
-    <path d="M48 351L53 356L63 345" fill="none" stroke="#6EE7B7" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="80" y="345" fill="#F4F7FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14" font-weight="700">Courtship bout validated</text>
-    <text x="80" y="366" fill="#8F9AB1" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12">00:02:14–00:02:21 · ready for export</text>
-    <rect x="398" y="333" width="86" height="36" rx="18" fill="#6F4BDB"/>
-    <text x="421" y="356" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="700">EXPORT</text>
+  <path d="M823 62H880" stroke="#252523" stroke-width="2"/>
+  <g transform="translate(48 115)">
+    <text y="17" fill="#74736E" font-family="SFMono-Regular,Consolas,monospace" font-size="11">fly_video.mp4  /  run 1783945709612</text>
+    <text y="75" fill="#252523" font-family="Georgia,Times New Roman,serif" font-size="42" letter-spacing="-1">Two-fly courtship assay</text>
+    <text y="112" fill="#74736E" font-family="Helvetica Neue,Arial,sans-serif" font-size="15">A completed tracking record with measured trajectories, review</text>
+    <text y="136" fill="#74736E" font-family="Helvetica Neue,Arial,sans-serif" font-size="15">candidates, and synchronized publication outputs.</text>
+    <g transform="translate(0 177)">
+      <path d="M0 0H450M0 92H450" stroke="#E8E7E3"/>
+      <path d="M112 0V92M225 0V92M338 0V92" stroke="#E8E7E3"/>
+      <g font-family="Helvetica Neue,Arial,sans-serif">
+        <text x="0" y="23" fill="#74736E" font-size="10">FRAMES</text><text x="0" y="55" fill="#252523" font-size="24" font-weight="600">3,947</text><text x="0" y="76" fill="#A3A19B" font-size="9">25 fps</text>
+        <text x="130" y="23" fill="#74736E" font-size="10">VALID TRACKING</text><text x="130" y="55" fill="#252523" font-size="24" font-weight="600">50.4%</text><text x="130" y="76" fill="#A3A19B" font-size="9">1,988 frames</text>
+        <text x="243" y="23" fill="#74736E" font-size="10">AVG PROXIMITY</text><text x="243" y="55" fill="#252523" font-size="24" font-weight="600">108.9 px</text><text x="243" y="76" fill="#A3A19B" font-size="9">valid frames only</text>
+        <text x="356" y="23" fill="#74736E" font-size="10">BOUTS</text><text x="356" y="55" fill="#252523" font-size="24" font-weight="600">0</text><text x="356" y="76" fill="#A3A19B" font-size="9">22 notes</text>
+      </g>
+    </g>
+    <g transform="translate(0 307)">
+      <rect width="450" height="68" rx="8" fill="#E8F2F8"/>
+      <text x="18" y="25" fill="#246486" font-family="Georgia,Times New Roman,serif" font-size="17">Measured tracking validity</text>
+      <text x="18" y="47" fill="#496B7B" font-family="Helvetica Neue,Arial,sans-serif" font-size="11">Two separate fly observations, not an accuracy score.</text>
+      <text x="371" y="43" fill="#246486" font-family="Helvetica Neue,Arial,sans-serif" font-size="25" font-weight="600">50.4%</text>
+    </g>
+  </g>
+  <g transform="translate(550 105)">
+    <rect width="602" height="369" rx="10" fill="#FFFFFF" stroke="#E8E7E3"/>
+    <text x="22" y="32" fill="#252523" font-family="Helvetica Neue,Arial,sans-serif" font-size="13" font-weight="600">Observation</text>
+    <rect x="22" y="49" width="380" height="226" rx="7" fill="#20211F"/>
+    <rect x="49" y="73" width="326" height="178" rx="4" fill="#2D302D" stroke="#555852"/>
+    <path d="M78 220C120 184 139 211 174 158C207 111 241 183 275 127C301 84 332 117 353 92" fill="none" stroke="#B9D7E7" stroke-width="3" stroke-linecap="round"/>
+    <path d="M75 95C123 107 126 151 176 174C229 198 278 223 354 216" fill="none" stroke="#C9D8C7" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="275" cy="127" r="7" fill="#E8F2F8" stroke="#246486" stroke-width="2"/><circle cx="176" cy="174" r="7" fill="#EDF3EC" stroke="#346538" stroke-width="2"/>
+    <text x="39" y="297" fill="#74736E" font-family="Helvetica Neue,Arial,sans-serif" font-size="10">Annotated video and frame measurements remain synchronized.</text>
+    <g transform="translate(424 49)">
+      <text y="13" fill="#252523" font-family="Georgia,Times New Roman,serif" font-size="18">Review notes</text>
+      <circle cx="142" cy="7" r="14" fill="#FBF3DB"/><text x="136" y="11" fill="#886007" font-family="Helvetica Neue,Arial,sans-serif" font-size="10" font-weight="700">22</text>
+      <path d="M0 34H156M0 100H156M0 166H156M0 232H156" stroke="#E8E7E3"/>
+      <text x="2" y="57" fill="#246486" font-family="Helvetica Neue,Arial,sans-serif" font-size="11" font-weight="600">Contour merge</text><text x="112" y="57" fill="#74736E" font-family="Consolas,monospace" font-size="9">00:12.8</text><text x="2" y="77" fill="#A3A19B" font-family="Helvetica Neue,Arial,sans-serif" font-size="9">31 frames  /  confidence 0.18</text>
+      <text x="2" y="123" fill="#252523" font-family="Helvetica Neue,Arial,sans-serif" font-size="11" font-weight="600">Identity uncertainty</text><text x="112" y="123" fill="#74736E" font-family="Consolas,monospace" font-size="9">00:38.2</text><text x="2" y="143" fill="#A3A19B" font-family="Helvetica Neue,Arial,sans-serif" font-size="9">48 frames  /  inspect identity</text>
+      <text x="2" y="189" fill="#252523" font-family="Helvetica Neue,Arial,sans-serif" font-size="11" font-weight="600">Detection loss</text><text x="112" y="189" fill="#74736E" font-family="Consolas,monospace" font-size="9">01:31.4</text><text x="2" y="209" fill="#A3A19B" font-family="Helvetica Neue,Arial,sans-serif" font-size="9">36 frames  /  zero contours</text>
+      <rect y="252" width="72" height="34" rx="5" fill="#FBEAEC" stroke="#ECCFD2"/><text x="20" y="274" fill="#983A3A" font-family="Helvetica Neue,Arial,sans-serif" font-size="10" font-weight="600">Reject</text>
+      <rect x="82" y="252" width="74" height="34" rx="5" fill="#EDF3EC" stroke="#CADFC9"/><text x="99" y="274" fill="#346538" font-family="Helvetica Neue,Arial,sans-serif" font-size="10" font-weight="600">Confirm</text>
+    </g>
+    <rect x="22" y="325" width="558" height="24" rx="5" fill="#EDF3EC"/>
+    <circle cx="36" cy="337" r="4" fill="#346538"/><text x="48" y="341" fill="#346538" font-family="Helvetica Neue,Arial,sans-serif" font-size="10" font-weight="600">Integrity passed</text>
+    <text x="448" y="341" fill="#74736E" font-family="Consolas,monospace" font-size="9">SYNC OK</text>
   </g>
 </svg>

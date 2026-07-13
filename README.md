@@ -9,11 +9,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/sudoax0n/Flyt/releases"><img src="https://img.shields.io/github/v/release/sudoax0n/Flyt?include_prereleases&style=flat-square&color=7c5cff" alt="GitHub release" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-f3c969.svg?style=flat-square" alt="MIT license" /></a>
-  <img src="https://img.shields.io/badge/Python-3.8%2B-45b8ff.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.8+" />
-  <img src="https://img.shields.io/badge/Node-16%2B-6ee7b7.svg?style=flat-square&logo=node.js&logoColor=white" alt="Node 16+" />
-  <img src="https://img.shields.io/badge/Baseline-CPU--first-9b7cff.svg?style=flat-square" alt="CPU-first baseline" />
+  <a href="https://github.com/sudoax0n/Flyt/releases"><img src="https://img.shields.io/github/v/release/sudoax0n/Flyt?include_prereleases&style=flat-square&color=252523" alt="GitHub release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-346538.svg?style=flat-square" alt="MIT license" /></a>
+  <img src="https://img.shields.io/badge/Python-3.8%2B-246486.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.8+" />
+  <img src="https://img.shields.io/badge/Node-16%2B-346538.svg?style=flat-square&logo=node.js&logoColor=white" alt="Node 16+" />
+  <img src="https://img.shields.io/badge/Baseline-CPU--first-74736e.svg?style=flat-square" alt="CPU-first baseline" />
 </p>
 
 <p align="center">
