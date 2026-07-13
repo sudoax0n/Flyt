@@ -649,17 +649,18 @@ function App() {
       }
     } catch { /* events optional until first track */ }
 
-    if (!runId) {
-      try {
-        const verRes = await fetch(`/api/verification?t=${cacheBust}`, { cache: 'no-store' });
-        if (verRes.ok) {
-          const verData = await verRes.json();
-          (verData.reviews || []).forEach((r) => {
-            reviews[r.event_id] = r;
-          });
-        }
-      } catch { /* keep empty reviews */ }
-    }
+    try {
+      const verificationUrl = runId
+        ? `/api/verification?runId=${encodeURIComponent(runId)}&t=${cacheBust}`
+        : `/api/verification?t=${cacheBust}`;
+      const verRes = await fetch(verificationUrl, { cache: 'no-store' });
+      if (verRes.ok) {
+        const verData = await verRes.json();
+        (verData.reviews || []).forEach((r) => {
+          reviews[r.event_id] = r;
+        });
+      }
+    } catch { /* keep empty reviews */ }
 
     if (generation !== loadGenerationRef.current) return { fps: 30 };
 
@@ -791,11 +792,12 @@ function App() {
   // Load a past run's snapshot (data.csv + events.json from public/history/<runId>/)
   // into the active dashboard. Video for past runs is not snapshotted — clear it
   // so the player doesn't show a stale frame.
-  const loadHistoricRun = async (runId) => {
+  const loadHistoricRun = async (run) => {
+    const runId = run.runId;
     const generation = ++loadGenerationRef.current;
     const cacheBust = Date.now();
     setMediaCacheBust(cacheBust);
-    setRunTimestamp(new Date().toISOString());
+    setRunTimestamp(run.timestamp || null);
     setIsHistoricRun(true);
     try {
       // Load events first to get accurate fps (avoids stale state) for sleep + pxsec normalization
@@ -1034,7 +1036,7 @@ function App() {
                      history.map((run) => (
                        <div
                          key={run.runId}
-                         onClick={() => loadHistoricRun(run.runId)}
+                         onClick={() => loadHistoricRun(run)}
                          className="grid grid-cols-5 p-4 border-b border-zinc-200 dark:border-zinc-800 text-sm items-center hover:bg-zinc-50 dark:hover:bg-zinc-900/50 cursor-pointer transition-colors group last:border-b-0">
                           <div className="font-mono text-xs font-semibold text-zinc-900 dark:text-white">{run.runId}</div>
                           <div className="text-zinc-500 dark:text-zinc-400 text-xs">{formatRunDate(run.timestamp)}</div>

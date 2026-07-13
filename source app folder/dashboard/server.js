@@ -119,7 +119,7 @@ export function createFlytServer(options = {}) {
   let job = blankJob();
 
   const services = {
-    countFrames: options.services?.countFrames || (filePath, context) => getVideoFrameCount(
+    countFrames: options.services?.countFrames || ((filePath, context) => getVideoFrameCount(
       ffmpegPath,
       filePath,
       {
@@ -128,8 +128,8 @@ export function createFlytServer(options = {}) {
         children: context.children,
         killOptions,
       },
-    ),
-    runTracker: options.services?.runTracker || async (inputPath, outputs, overrides, context) => runCommand(
+    )),
+    runTracker: options.services?.runTracker || ((inputPath, outputs, overrides, context) => runCommand(
       pythonExe,
       buildTrackerArgs(trackerScript, inputPath, outputs, overrides, defaults),
       {
@@ -148,8 +148,8 @@ export function createFlytServer(options = {}) {
         },
         onStderr: (text) => console.error(`[Tracker] ${text.trim()}`),
       },
-    ),
-    transcode: options.services?.transcode || (rawPath, finalPath, context) => transcodeVideo(
+    )),
+    transcode: options.services?.transcode || ((rawPath, finalPath, context) => transcodeVideo(
       ffmpegPath,
       rawPath,
       finalPath,
@@ -159,7 +159,7 @@ export function createFlytServer(options = {}) {
         children: context.children,
         killOptions,
       },
-    ),
+    )),
     publish: options.services?.publish || ((entries, token) => publishBundle(entries, token)),
     snapshot: options.services?.snapshot || snapshotRunToHistory,
   };
