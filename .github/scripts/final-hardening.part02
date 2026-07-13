@@ -108,6 +108,7 @@ utils_test = replace_once(
   publishBundle,
   recoverPublishArtifacts,
   resolveVerificationPath,
+  runCommand,
   scopeEventsForHistory,
   snapshotRunToHistory,
   terminateChild,
@@ -120,6 +121,7 @@ utils_test = replace_once(
   readCsvAvgProximity,
   recoverPublishArtifacts,
   resolveVerificationPath,
+  runCommand,
   scopeEventsForRun,
   SimulatedProcessCrash,
   terminateChild,
@@ -276,5 +278,3 @@ integration = replace_once(
     "    'frame,proximity_distance,occlusion_flag,tracking_valid,detection_count,fly1_area,fly2_area',\n    ...Array.from({ length: frames }, (_, index) => `${index},20,0,1,2,100,100`),\n",
     'integration valid CSV',
 )
-integration = replace_once(integration, '    snapshot: () => null,\n', '', 'integration snapshot service removal')
-integration = replace_once(
