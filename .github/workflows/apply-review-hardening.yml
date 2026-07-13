@@ -32,7 +32,7 @@ jobs:
           cache: pip
           cache-dependency-path: source app folder/tracker/requirements.txt
 
-      - name: Apply exact frontend patch
+      - name: Apply exact review patches
         run: python .github/scripts/apply-review-hardening.py
 
       - name: Install dashboard dependencies
@@ -73,14 +73,20 @@ jobs:
       - name: Run tracker regression tests
         run: python -m unittest discover -s 'source app folder/tracker/tests' -p 'test_*.py' -v
 
-      - name: Commit validated frontend integration
+      - name: Commit validated review fixes
         run: |
-          if git diff --quiet -- 'source app folder/dashboard/src/App.jsx'; then
-            echo 'Expected App.jsx patch was not produced.' >&2
+          if git diff --quiet -- \
+            'source app folder/dashboard/server.js' \
+            'source app folder/dashboard/src/App.jsx' \
+            '.github/eslint-diagnostics.json'; then
+            echo 'Expected validated review patches were not produced.' >&2
             exit 1
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add 'source app folder/dashboard/src/App.jsx'
-          git commit -m 'fix: complete historic verification integration'
+          git add -A \
+            'source app folder/dashboard/server.js' \
+            'source app folder/dashboard/src/App.jsx' \
+            '.github/eslint-diagnostics.json'
+          git commit -m 'fix: complete review hardening integration'
           git push origin HEAD:fix/critical-job-races
