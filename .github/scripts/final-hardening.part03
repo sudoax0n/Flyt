@@ -1,3 +1,5 @@
+integration = replace_once(integration, '    snapshot: () => null,\n', '', 'integration snapshot service removal')
+integration = replace_once(
     integration,
     '''  assert.equal(metadata.finalVideoFrames, 4);
   assert.equal(metadata.syncOk, true);
@@ -276,5 +278,3 @@ jobs:
 
       - name: Install dashboard dependencies
         working-directory: source app folder/dashboard
-        run: npm ci
-
