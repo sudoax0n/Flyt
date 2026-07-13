@@ -57,12 +57,28 @@ server_path = Path("source app folder/dashboard/server.js")
 server_source = server_path.read_text(encoding="utf-8")
 server_replacements = [
     (
+        "    countFrames: options.services?.countFrames || (filePath, context) => getVideoFrameCount(\n",
+        "    countFrames: options.services?.countFrames || ((filePath, context) => getVideoFrameCount(\n",
+    ),
+    (
+        "        killOptions,\n      },\n    ),\n    runTracker:",
+        "        killOptions,\n      },\n    )),\n    runTracker:",
+    ),
+    (
         "    runTracker: options.services?.runTracker || async (inputPath, outputs, overrides, context) => runCommand(\n",
         "    runTracker: options.services?.runTracker || ((inputPath, outputs, overrides, context) => runCommand(\n",
     ),
     (
         "        onStderr: (text) => console.error(`[Tracker] ${text.trim()}`),\n      },\n    ),\n    transcode:",
         "        onStderr: (text) => console.error(`[Tracker] ${text.trim()}`),\n      },\n    )),\n    transcode:",
+    ),
+    (
+        "    transcode: options.services?.transcode || (rawPath, finalPath, context) => transcodeVideo(\n",
+        "    transcode: options.services?.transcode || ((rawPath, finalPath, context) => transcodeVideo(\n",
+    ),
+    (
+        "        killOptions,\n      },\n    ),\n    publish:",
+        "        killOptions,\n      },\n    )),\n    publish:",
     ),
 ]
 
@@ -74,4 +90,4 @@ for old, new in server_replacements:
 
 server_path.write_text(server_source, encoding="utf-8")
 Path(".github/eslint-diagnostics.json").unlink(missing_ok=True)
-print("Applied frontend integration and server parser hardening patches.")
+print("Applied frontend integration and all server parser hardening patches.")
