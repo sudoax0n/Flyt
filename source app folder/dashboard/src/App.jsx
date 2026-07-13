@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Papa from 'papaparse';
+import { prismDistance, prismVelocity, proximityValue } from './metrics.js';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, 
   ScatterChart, Scatter, ZAxis
@@ -44,6 +45,14 @@ function formatTimeRange(startSec, endSec) {
   return `${fmt(startSec)} - ${fmt(endSec)}`;
 }
 
+function computeCourtshipStats(eventList, reviews) {
+  const courtshipEvents = eventList.filter((e) => e.type === 'courtship_bout');
+  const verified = courtshipEvents.filter(
+    (e) => reviews[e.id]?.verdict === 'confirmed'
+  ).length;
+  return { detected: courtshipEvents.length, verified };
+}
+
 function eventTypeLabel(type) {
   if (type === 'courtship_bout') return 'Courtship';
   if (type === 'low_confidence_segment') return 'Low confidence';
@@ -64,9 +73,9 @@ function exportPrismCsv(rows, fps) {
   const lines = [header.join(',')];
   rows.forEach((r) => {
     const t = Number(r.frame) / effectiveFps;
-    const v1 = Number(r.fly1_speed_pxsec ?? r.fly1_speed ?? 0);
-    const v2 = Number(r.fly2_speed_pxsec ?? r.fly2_speed ?? 0);
-    const dist = Number(r.proximity_distance ?? 0);
+    const v1 = prismVelocity(r, 'fly1');
+    const v2 = prismVelocity(r, 'fly2');
+    const dist = prismDistance(r);
     lines.push([t, v1, v2, dist].map(csvEscape).join(','));
   });
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
@@ -487,16 +496,11 @@ function UploadView({ uploadJob, onFileSelect }) {
   );
 }
 
-function SettingsModal({ isOpen, onClose, settings, onApply }) {
-  const [draft, setDraft] = React.useState(settings);
+// Mounted only while open (see App). Fresh mount resets draft from last applied
+// settings — no setState-in-effect sync. Cancel unmounts without onApply.
+function SettingsModal({ onClose, settings, onApply }) {
+  const [draft, setDraft] = React.useState(() => ({ ...settings }));
   const [showAdvanced, setShowAdvanced] = React.useState(false);
-
-  // Re-sync draft when the modal opens or saved settings change.
-  useEffect(() => {
-    if (isOpen) setDraft(settings);
-  }, [isOpen, settings]);
-
-  if (!isOpen) return null;
 
   const setField = (key) => (e) => {
     const val = e.target.type === 'number' ? Number(e.target.value) : e.target.value;
@@ -610,16 +614,11 @@ function App() {
   });
   const pollRef = useRef(null);
   const loadGenerationRef = useRef(0);
+  // Latest fps for loadAll fallback without re-creating the callback each frame update.
+  const runFpsRef = useRef(runFps);
+  runFpsRef.current = runFps;
 
-  const computeCourtshipStats = (eventList, reviews) => {
-    const courtshipEvents = eventList.filter((e) => e.type === 'courtship_bout');
-    const verified = courtshipEvents.filter(
-      (e) => reviews[e.id]?.verdict === 'confirmed'
-    ).length;
-    return { detected: courtshipEvents.length, verified };
-  };
-
-  const loadEventsAndVerification = async (cacheBust = Date.now(), generation = loadGenerationRef.current, runId = null) => {
+  const loadEventsAndVerification = useCallback(async (cacheBust = Date.now(), generation = loadGenerationRef.current, runId = null) => {
     let eventList = [];
     const reviews = {};
     let fps = 30;
@@ -649,17 +648,18 @@ function App() {
       }
     } catch { /* events optional until first track */ }
 
-    if (!runId) {
-      try {
-        const verRes = await fetch(`/api/verification?t=${cacheBust}`, { cache: 'no-store' });
-        if (verRes.ok) {
-          const verData = await verRes.json();
-          (verData.reviews || []).forEach((r) => {
-            reviews[r.event_id] = r;
-          });
-        }
-      } catch { /* keep empty reviews */ }
-    }
+    try {
+      const verificationUrl = runId
+        ? `/api/verification?runId=${encodeURIComponent(runId)}&t=${cacheBust}`
+        : `/api/verification?t=${cacheBust}`;
+      const verRes = await fetch(verificationUrl, { cache: 'no-store' });
+      if (verRes.ok) {
+        const verData = await verRes.json();
+        (verData.reviews || []).forEach((r) => {
+          reviews[r.event_id] = r;
+        });
+      }
+    } catch { /* keep empty reviews */ }
 
     if (generation !== loadGenerationRef.current) return { fps: 30 };
 
@@ -668,15 +668,13 @@ function App() {
     setEvents(eventList);
     setReviewsByEventId(reviews);
     setStats((prev) => {
-      const { detected, verified } = runId
-        ? { detected: eventList.filter((e) => e.type === 'courtship_bout').length, verified: 0 }
-        : computeCourtshipStats(eventList, reviews);
+      const { detected, verified } = computeCourtshipStats(eventList, reviews);
       return { ...prev, courtshipDetected: detected, courtshipVerified: verified };
     });
     return { fps, frames };
-  };
+  }, []);
 
-  const loadData = (cacheBust = Date.now(), generation = loadGenerationRef.current, customPath = null, fps = 30) => new Promise((resolve) => {
+  const loadData = useCallback((cacheBust = Date.now(), generation = loadGenerationRef.current, customPath = null, fps = 30) => new Promise((resolve) => {
     const url = customPath ? `${customPath}${customPath.includes('?') ? '&' : '?'}t=${cacheBust}` : `/data.csv?t=${cacheBust}`;
     Papa.parse(url, {
       download: true,
@@ -721,9 +719,11 @@ function App() {
         const hmData = [];
 
         parsedData.forEach((row, i) => {
-          // Average proximity only over frames where flies are separate (exclude merged/occluded where proximity=0 by design)
-          if (row.proximity_distance != null && !row.occlusion_flag) {
-            totalProx += row.proximity_distance;
+          // Only measured two-fly observations contribute. Dropouts retain
+          // display coordinates but carry no scientifically valid proximity.
+          const observedProximity = proximityValue(row);
+          if (observedProximity !== null) {
+            totalProx += observedProximity;
             proxCount++;
           }
           if (row.activity_level > maxAct) maxAct = row.activity_level;
@@ -757,7 +757,7 @@ function App() {
       },
       error: () => resolve(0),
     });
-  });
+  }), []);
 
   const handleVerdict = async (eventId, verdict) => {
     try {
@@ -779,23 +779,24 @@ function App() {
     }
   };
 
-  const loadHistory = async (cacheBust = Date.now()) => {
+  const loadHistory = useCallback(async (cacheBust = Date.now()) => {
     try {
       const res = await fetch(`/api/history?t=${cacheBust}`, { cache: 'no-store' });
       if (!res.ok) return;
       const hist = await res.json();
       setHistory(Array.isArray(hist.runs) ? hist.runs : []);
     } catch { /* history optional */ }
-  };
+  }, []);
 
   // Load a past run's snapshot (data.csv + events.json from public/history/<runId>/)
   // into the active dashboard. Video for past runs is not snapshotted — clear it
   // so the player doesn't show a stale frame.
-  const loadHistoricRun = async (runId) => {
+  const loadHistoricRun = async (run) => {
+    const runId = run.runId;
     const generation = ++loadGenerationRef.current;
     const cacheBust = Date.now();
     setMediaCacheBust(cacheBust);
-    setRunTimestamp(new Date().toISOString());
+    setRunTimestamp(run.timestamp || null);
     setIsHistoricRun(true);
     try {
       // Load events first to get accurate fps (avoids stale state) for sleep + pxsec normalization
@@ -819,23 +820,23 @@ function App() {
     }
   };
 
-  const loadAll = async (cacheBust = Date.now()) => {
+  const loadAll = useCallback(async (cacheBust = Date.now()) => {
     const generation = ++loadGenerationRef.current;
     setMediaCacheBust(cacheBust);
     setIsHistoricRun(false);
     // Load events first to get accurate fps for loadData (sleep calc + any legacy pxsec normalization)
     const eventsResult = await loadEventsAndVerification(cacheBust, generation);
-    const currentFps = (eventsResult && eventsResult.fps > 0) ? eventsResult.fps : runFps;
+    const currentFps = (eventsResult && eventsResult.fps > 0) ? eventsResult.fps : runFpsRef.current;
     await Promise.all([
       loadData(cacheBust, generation, null, currentFps),
       loadHistory(cacheBust),
     ]);
-  };
+  }, [loadEventsAndVerification, loadData, loadHistory]);
 
   useEffect(() => {
     loadAll();
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, []);
+  }, [loadAll]);
 
   useEffect(() => {
     if (!uploadJob.active) return undefined;
@@ -876,7 +877,7 @@ function App() {
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = null;
     };
-  }, [uploadJob.active]);
+  }, [uploadJob.active, loadAll]);
 
   const handleFileSelect = async (file) => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -922,12 +923,13 @@ function App() {
   return (
     <div className={`h-screen font-sans antialiased overflow-hidden transition-colors duration-300 ${isDark ? 'dark bg-[#000000] text-zinc-100' : 'bg-zinc-50 text-zinc-900'}`}>
 
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        settings={settings}
-        onApply={setSettings}
-      />
+      {isSettingsOpen && (
+        <SettingsModal
+          onClose={() => setIsSettingsOpen(false)}
+          settings={settings}
+          onApply={setSettings}
+        />
+      )}
 
       <div className="flex h-full w-full">
         {/* Sidebar */}
@@ -1034,7 +1036,7 @@ function App() {
                      history.map((run) => (
                        <div
                          key={run.runId}
-                         onClick={() => loadHistoricRun(run.runId)}
+                         onClick={() => loadHistoricRun(run)}
                          className="grid grid-cols-5 p-4 border-b border-zinc-200 dark:border-zinc-800 text-sm items-center hover:bg-zinc-50 dark:hover:bg-zinc-900/50 cursor-pointer transition-colors group last:border-b-0">
                           <div className="font-mono text-xs font-semibold text-zinc-900 dark:text-white">{run.runId}</div>
                           <div className="text-zinc-500 dark:text-zinc-400 text-xs">{formatRunDate(run.timestamp)}</div>
