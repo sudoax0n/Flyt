@@ -14,6 +14,7 @@ permissions:
 jobs:
   patch-and-validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,9 +45,10 @@ jobs:
 
           run_check() {
             label="$1"
-            shift
+            seconds="$2"
+            shift 2
             echo "===== $label =====" | tee -a "$diagnostics"
-            "$@" >> "$diagnostics" 2>&1
+            timeout --signal=TERM --kill-after=10s "${seconds}s" "$@" >> "$diagnostics" 2>&1
             status=$?
             cat "$diagnostics"
             if [ "$status" -ne 0 ]; then
@@ -55,13 +57,13 @@ jobs:
             echo >> "$diagnostics"
           }
 
-          run_check 'npm ci' bash -lc "cd 'source app folder/dashboard' && npm ci"
-          run_check 'backend lint' bash -lc "cd 'source app folder/dashboard' && npm run lint:backend"
-          run_check 'Node HTTP and utility tests' bash -lc "cd 'source app folder/dashboard' && npm run test:server"
-          run_check 'dashboard build' bash -lc "cd 'source app folder/dashboard' && npm run build"
-          run_check 'tracker dependency install' python -m pip install -r 'source app folder/tracker/requirements.txt'
-          run_check 'tracker syntax' python -m py_compile 'source app folder/tracker/tracker.py'
-          run_check 'tracker regression tests' python -m unittest discover -s 'source app folder/tracker/tests' -p 'test_*.py' -v
+          run_check 'npm ci' 180 bash -lc "cd 'source app folder/dashboard' && npm ci"
+          run_check 'backend lint' 60 bash -lc "cd 'source app folder/dashboard' && npm run lint:backend"
+          run_check 'Node HTTP and utility tests' 120 bash -lc "cd 'source app folder/dashboard' && npm run test:server"
+          run_check 'dashboard build' 120 bash -lc "cd 'source app folder/dashboard' && npm run build"
+          run_check 'tracker dependency install' 180 python -m pip install -r 'source app folder/tracker/requirements.txt'
+          run_check 'tracker syntax' 30 python -m py_compile 'source app folder/tracker/tracker.py'
+          run_check 'tracker regression tests' 60 python -m unittest discover -s 'source app folder/tracker/tests' -p 'test_*.py' -v
 
           if [ "$overall" -ne 0 ]; then
             git config user.name 'github-actions[bot]'
