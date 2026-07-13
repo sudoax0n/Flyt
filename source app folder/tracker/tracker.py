@@ -11,6 +11,7 @@ import pandas as pd
 
 LOW_CONFIDENCE_THRESHOLD = 0.2
 LOW_CONFIDENCE_MIN_FRAMES = 30
+COURTSHIP_MIN_IDENTITY_CONFIDENCE = 0.2
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -91,6 +92,29 @@ def build_event_record(
     }
 
 
+def is_courtship_frame(row: dict[str, Any], proximity_threshold: float) -> bool:
+    proximity = value_or(row, "proximity_distance", math.inf)
+    confidence = value_or(row, "identity_confidence", 0.0)
+    occluded = value_or(row, "occlusion_flag", 1.0) != 0.0
+    fly1_present = value_or(row, "fly1_area", 0.0) > 0.0
+    fly2_present = value_or(row, "fly2_area", 0.0) > 0.0
+    return (
+        math.isfinite(proximity)
+        and not occluded
+        and fly1_present
+        and fly2_present
+        and confidence >= COURTSHIP_MIN_IDENTITY_CONFIDENCE
+        and proximity < proximity_threshold
+    )
+
+
+def is_low_confidence_frame(row: dict[str, Any]) -> bool:
+    return (
+        value_or(row, "occlusion_flag", 0.0) != 0.0
+        or value_or(row, "identity_confidence", 1.0) < LOW_CONFIDENCE_THRESHOLD
+    )
+
+
 def detect_events(
     rows: list[dict[str, Any]],
     fps: float,
@@ -101,17 +125,21 @@ def detect_events(
     counter = 1
     courtship = detect_sustained_segments(
         rows,
-        lambda row: value_or(row, "proximity_distance", 999.0) < proximity_threshold,
+        lambda row: is_courtship_frame(row, proximity_threshold),
         max(1, bout_min_frames),
     )
     low_confidence = detect_sustained_segments(
         rows,
-        lambda row: value_or(row, "identity_confidence", 1.0) < LOW_CONFIDENCE_THRESHOLD,
+        is_low_confidence_frame,
         LOW_CONFIDENCE_MIN_FRAMES,
     )
     for event_type, segments, reason in (
-        ("courtship_bout", courtship, "proximity_sustained"),
-        ("low_confidence_segment", low_confidence, "identity_confidence_low"),
+        (
+            "courtship_bout",
+            courtship,
+            "separate_flies_with_sustained_proximity_and_identity_confidence",
+        ),
+        ("low_confidence_segment", low_confidence, "identity_or_occlusion_uncertain"),
     ):
         for start, end in segments:
             segment = [row for row in rows if start <= int(row["frame"]) <= end]
@@ -139,6 +167,8 @@ def write_events_json(
         "detection_params": {
             "proximity_threshold_px": proximity_threshold,
             "bout_min_frames": max(1, bout_min_frames),
+            "courtship_min_identity_confidence": COURTSHIP_MIN_IDENTITY_CONFIDENCE,
+            "courtship_requires_separate_flies": True,
             "low_confidence_threshold": LOW_CONFIDENCE_THRESHOLD,
             "low_confidence_min_frames": LOW_CONFIDENCE_MIN_FRAMES,
         },
@@ -157,7 +187,23 @@ def assignment_confidence(ca, cb, prev_f1, prev_f2) -> float:
     direct = float(math.dist(ca, prev_f1) + math.dist(cb, prev_f2))
     swapped = float(math.dist(ca, prev_f2) + math.dist(cb, prev_f1))
     margin = abs(swapped - direct)
-    return float(np.clip(margin / (max(direct, swapped) + 1e-6), 0.2, 1.0))
+    return float(np.clip(margin / (max(direct, swapped) + 1e-6), 0.0, 1.0))
+
+
+def frame_sync_ok(
+    frames_processed: int,
+    csv_rows: int,
+    last_frame: int,
+    expected_frame_count: int,
+) -> bool:
+    internal_sync_ok = (
+        csv_rows == frames_processed
+        and (frames_processed == 0 or last_frame == frames_processed - 1)
+    )
+    expected_sync_ok = (
+        expected_frame_count <= 0 or frames_processed == expected_frame_count
+    )
+    return internal_sync_ok and expected_sync_ok
 
 
 def parse_roi(value: str | None) -> tuple[int, int, int, int] | None:
@@ -216,7 +262,10 @@ def run_tracker(args: argparse.Namespace) -> int:
 
     print(f"Starting tracking on {video_path}...")
     if roi_rect:
-        print(f"ROI active: x={roi_rect[0]}, y={roi_rect[1]}, w={roi_rect[2]}, h={roi_rect[3]}")
+        print(
+            f"ROI active: x={roi_rect[0]}, y={roi_rect[1]}, "
+            f"w={roi_rect[2]}, h={roi_rect[3]}"
+        )
 
     try:
         while cap.isOpened():
@@ -302,7 +351,7 @@ def run_tracker(args: argparse.Namespace) -> int:
                 was_initialized = is_initialized
                 f1_coords = f2_coords = point
                 occlusion_flag = 1
-                identity_confidence = 0.25
+                identity_confidence = 0.0
                 fly1_area = fly2_area = areas[0]
                 if was_initialized:
                     f1_speed = displacement(prev_f1, point, was_initialized)
@@ -312,24 +361,36 @@ def run_tracker(args: argparse.Namespace) -> int:
                 if out:
                     x, y, w, h = bboxes[0]
                     cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 255), 3)
-                    cv2.putText(frame, "MERGED", (x, max(0, y - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                    cv2.putText(
+                        frame,
+                        "MERGED",
+                        (x, max(0, y - 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (0, 255, 255),
+                        2,
+                    )
             elif is_initialized:
                 f1_coords, f2_coords = prev_f1, prev_f2
                 proximity = float(math.dist(f1_coords, f2_coords))
-                identity_confidence = 0.15
+                identity_confidence = 0.0
 
             data.append({
                 "frame": frame_num,
-                "fly1_x": f1_coords[0], "fly1_y": f1_coords[1],
-                "fly2_x": f2_coords[0], "fly2_y": f2_coords[1],
-                "fly1_speed": f1_speed, "fly2_speed": f2_speed,
+                "fly1_x": f1_coords[0],
+                "fly1_y": f1_coords[1],
+                "fly2_x": f2_coords[0],
+                "fly2_y": f2_coords[1],
+                "fly1_speed": f1_speed,
+                "fly2_speed": f2_speed,
                 "fly1_speed_pxsec": round(f1_speed * effective_fps, 4),
                 "fly2_speed_pxsec": round(f2_speed * effective_fps, 4),
                 "activity_level": activity_level,
                 "proximity_distance": proximity,
                 "occlusion_flag": occlusion_flag,
                 "identity_confidence": round(identity_confidence, 4),
-                "fly1_area": fly1_area, "fly2_area": fly2_area,
+                "fly1_area": fly1_area,
+                "fly2_area": fly2_area,
             })
             if out:
                 out.write(frame)
@@ -345,17 +406,25 @@ def run_tracker(args: argparse.Namespace) -> int:
     pd.DataFrame(data).to_csv(args.output_csv, index=False)
     if args.output_events:
         write_events_json(
-            data, effective_fps, args.output_events,
-            args.proximity_threshold, args.bout_min_frames,
+            data,
+            effective_fps,
+            args.output_events,
+            args.proximity_threshold,
+            args.bout_min_frames,
         )
     last_frame = data[-1]["frame"] if data else -1
-    sync_ok = len(data) == frame_num and (frame_num == 0 or last_frame == frame_num - 1)
+    sync_ok = frame_sync_ok(
+        frame_num, len(data), last_frame, expected_frame_count,
+    )
     print(
         f"TRACKER_SYNC frames_processed={frame_num} csv_rows={len(data)} "
         f"expected_video_frames={expected_frame_count} sync_ok={str(sync_ok).lower()}"
     )
     if not sync_ok:
-        print("Warning: internal frame/CSV sync mismatch detected", file=sys.stderr)
+        print(
+            "Error: frame integrity mismatch between decoded input, tracker loop, and CSV",
+            file=sys.stderr,
+        )
         return 2
     print(f"Tracking completed! Data saved to {args.output_csv}.")
     return 0
