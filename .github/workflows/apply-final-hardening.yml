@@ -105,8 +105,8 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git restore -- '.github/workflows/critical-fixes-ci.yml'
           git add -A -- \
-            '.github/workflows/critical-fixes-ci.yml' \
             'source app folder/dashboard/server-utils.js' \
             'source app folder/dashboard/server.js' \
             'source app folder/dashboard/src/App.jsx' \
