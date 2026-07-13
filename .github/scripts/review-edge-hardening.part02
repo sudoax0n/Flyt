@@ -1,0 +1,322 @@
+      };
+      throw error;
+    } finally {
+      if (context.children.size === 0) terminating = false;
+    }
+  }
+''',
+    '''  function readVerification(filePath) {
+    const data = readJson(filePath, { version: 1, reviews: [] });
+    return Array.isArray(data.reviews) ? data : { version: 1, reviews: [] };
+  }
+
+  function waitForUploadClose(state) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Multipart upload did not close after reset')), 3000);
+      timer.unref?.();
+      state.closed.then(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
+  async function removePendingUploadFile(filePath) {
+    if (!filePath) return;
+    let lastError = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        fs.rmSync(filePath, { force: true });
+        if (!fs.existsSync(filePath)) return;
+        lastError = new Error(`Could not remove cancelled upload: ${filePath}`);
+      } catch (error) {
+        lastError = error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw lastError || new Error(`Could not remove cancelled upload: ${filePath}`);
+  }
+
+  async function abortPendingUploads(states) {
+    states.forEach((state) => {
+      if (!state.request.destroyed) state.request.destroy();
+    });
+    await Promise.all(states.map(async (state) => {
+      await waitForUploadClose(state);
+      await removePendingUploadFile(state.filePath);
+      state.release();
+    }));
+  }
+
+  async function stopActiveRun() {
+    epoch += 1;
+    const context = activeRun;
+    const uploadStates = [...pendingUploads.values()];
+    activeRun = null;
+    const hasWork = Boolean(context) || uploadStates.length > 0;
+    job = { ...blankJob(), status: hasWork ? 'stopping' : 'idle' };
+    if (!hasWork) return;
+
+    terminating = true;
+    context?.controller.abort();
+    let stoppedCleanly = false;
+    try {
+      const children = context ? [...context.children] : [];
+      await Promise.all([
+        abortPendingUploads(uploadStates),
+        ...children.map((child) => terminateChild(child, killOptions)),
+      ]);
+      if (context) {
+        await context.done.catch((error) => {
+          if (error?.name !== 'AbortError') throw error;
+        });
+      }
+      job = blankJob();
+      stoppedCleanly = true;
+    } catch (error) {
+      job = {
+        ...blankJob(),
+        status: 'error',
+        error: `Could not terminate active work: ${error.message}`,
+      };
+      throw error;
+    } finally {
+      if (
+        stoppedCleanly
+        && (!context || context.children.size === 0)
+        && pendingUploads.size === 0
+      ) terminating = false;
+    }
+  }
+''',
+    'abort multipart uploads and strict stop gate',
+)
+server = replace_once(
+    server,
+    '''    try {
+      const filePath = resolveVerificationPath(eventId, historyDir);
+      const data = readVerification(filePath);''',
+    '''    try {
+      assertEventBelongsToRun(eventId, historyDir);
+      const filePath = resolveVerificationPath(eventId, historyDir);
+      const data = readVerification(filePath);''',
+    'review membership validation',
+)
+server = replace_once(
+    server,
+    '''    getState: () => ({ epoch, uploadReserved, terminating, activeRun, job: { ...job } }),''',
+    '''    getState: () => ({
+      epoch,
+      uploadReserved,
+      terminating,
+      pendingUploads: pendingUploads.size,
+      activeRun,
+      job: { ...job },
+    }),''',
+    'expose pending upload state for tests',
+)
+write(server_path, server)
+
+# ---------------------------------------------------------------------------
+# Tracker and frontend metrics: invalid individual-fly velocity is missing too.
+# ---------------------------------------------------------------------------
+tracker_path = 'source app folder/tracker/tracker.py'
+tracker = read(tracker_path)
+tracker = replace_once(
+    tracker,
+    '''def displacement(previous, current, was_initialized: bool) -> float:
+    return float(math.dist(current, previous)) if was_initialized else 0.0
+
+
+def assignment_confidence''',
+    '''def displacement(previous, current, was_initialized: bool) -> float:
+    return float(math.dist(current, previous)) if was_initialized else 0.0
+
+
+def observed_speed(speed: float, tracking_valid: int) -> float:
+    return float(speed) if tracking_valid else math.nan
+
+
+def assignment_confidence''',
+    'tracker observed speed helper',
+)
+tracker = replace_once(
+    tracker,
+    '''            f1_speed = f2_speed = 0.0
+            proximity = math.nan''',
+    '''            f1_speed = f2_speed = math.nan
+            proximity = math.nan''',
+    'invalid speed defaults missing',
+)
+tracker = replace_once(
+    tracker,
+    '''                if was_initialized:
+                    f1_speed = displacement(prev_f1, f1_coords, was_initialized)
+                    f2_speed = displacement(prev_f2, f2_coords, was_initialized)
+                proximity = float(math.dist(f1_coords, f2_coords))''',
+    '''                if was_initialized:
+                    f1_speed = displacement(prev_f1, f1_coords, was_initialized)
+                    f2_speed = displacement(prev_f2, f2_coords, was_initialized)
+                else:
+                    f1_speed = f2_speed = 0.0
+                proximity = float(math.dist(f1_coords, f2_coords))''',
+    'valid initial speed zero',
+)
+tracker = replace_once(
+    tracker,
+    '''                if was_initialized:
+                    f1_speed = displacement(prev_f1, point, was_initialized)
+                    f2_speed = displacement(prev_f2, point, was_initialized)
+                prev_f1 = prev_f2 = point''',
+    '''                prev_f1 = prev_f2 = point''',
+    'do not fabricate merged fly speeds',
+)
+tracker = replace_once(
+    tracker,
+    '''            data.append({
+                "frame": frame_num,
+                "fly1_x": f1_coords[0],''',
+    '''            measured_f1_speed = observed_speed(f1_speed, tracking_valid)
+            measured_f2_speed = observed_speed(f2_speed, tracking_valid)
+            data.append({
+                "frame": frame_num,
+                "fly1_x": f1_coords[0],''',
+    'compute validity-aware speeds',
+)
+tracker = replace_once(
+    tracker,
+    '''                "fly1_speed": f1_speed,
+                "fly2_speed": f2_speed,
+                "fly1_speed_pxsec": round(f1_speed * effective_fps, 4),
+                "fly2_speed_pxsec": round(f2_speed * effective_fps, 4),''',
+    '''                "fly1_speed": measured_f1_speed,
+                "fly2_speed": measured_f2_speed,
+                "fly1_speed_pxsec": round(measured_f1_speed * effective_fps, 4),
+                "fly2_speed_pxsec": round(measured_f2_speed * effective_fps, 4),''',
+    'write only observed speeds',
+)
+write(tracker_path, tracker)
+
+metrics_path = 'source app folder/dashboard/src/metrics.js'
+metrics = read(metrics_path)
+metrics = replace_once(
+    metrics,
+    '''export function proximityValue(row) {
+  if (!row) return null;
+  const rawProximity = row.proximity_distance;
+  if (rawProximity === null || rawProximity === undefined || rawProximity === '') return null;
+  const proximity = Number(rawProximity);
+  if (!Number.isFinite(proximity)) return null;
+  if (Number(row.occlusion_flag ?? 0) !== 0) return null;
+
+  if (row.tracking_valid !== null && row.tracking_valid !== undefined && row.tracking_valid !== '') {
+    if (Number(row.tracking_valid) !== 1) return null;
+  } else if (row.detection_count !== null && row.detection_count !== undefined && row.detection_count !== '') {
+    if (Number(row.detection_count) < 2) return null;
+  } else if (
+    row.fly1_area !== null && row.fly1_area !== undefined
+    && row.fly2_area !== null && row.fly2_area !== undefined
+  ) {
+    if (!(Number(row.fly1_area) > 0 && Number(row.fly2_area) > 0)) return null;
+  }
+
+  return proximity;
+}
+
+export function computeAverageProximity(rows) {
+  const values = rows.map(proximityValue).filter((value) => value !== null);
+  if (!values.length) return 0;
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
+export function prismDistance(row) {
+  return proximityValue(row) ?? '';
+}
+''',
+    '''export function trackingObservationIsValid(row) {
+  if (!row || Number(row.occlusion_flag ?? 0) !== 0) return false;
+  if (row.tracking_valid !== null && row.tracking_valid !== undefined && row.tracking_valid !== '') {
+    return Number(row.tracking_valid) === 1;
+  }
+  if (row.detection_count !== null && row.detection_count !== undefined && row.detection_count !== '') {
+    return Number(row.detection_count) >= 2;
+  }
+  if (
+    row.fly1_area !== null && row.fly1_area !== undefined
+    && row.fly2_area !== null && row.fly2_area !== undefined
+  ) {
+    return Number(row.fly1_area) > 0 && Number(row.fly2_area) > 0;
+  }
+  return true;
+}
+
+export function proximityValue(row) {
+  if (!trackingObservationIsValid(row)) return null;
+  const rawProximity = row.proximity_distance;
+  if (rawProximity === null || rawProximity === undefined || rawProximity === '') return null;
+  const proximity = Number(rawProximity);
+  return Number.isFinite(proximity) ? proximity : null;
+}
+
+export function computeAverageProximity(rows) {
+  const values = rows.map(proximityValue).filter((value) => value !== null);
+  if (!values.length) return 0;
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
+export function prismDistance(row) {
+  return proximityValue(row) ?? '';
+}
+
+export function prismVelocity(row, flyKey) {
+  if (!trackingObservationIsValid(row)) return '';
+  const rawSpeed = row?.[`${flyKey}_speed_pxsec`] ?? row?.[`${flyKey}_speed`];
+  if (rawSpeed === null || rawSpeed === undefined || rawSpeed === '') return '';
+  const speed = Number(rawSpeed);
+  return Number.isFinite(speed) ? speed : '';
+}
+''',
+    'validity-aware Prism velocity',
+)
+write(metrics_path, metrics)
+
+app_path = 'source app folder/dashboard/src/App.jsx'
+app = read(app_path)
+app = replace_once(
+    app,
+    '''import { prismDistance, proximityValue } from './metrics.js';''',
+    '''import { prismDistance, prismVelocity, proximityValue } from './metrics.js';''',
+    'App metrics import',
+)
+app = replace_once(
+    app,
+    '''    const v1 = Number(r.fly1_speed_pxsec ?? r.fly1_speed ?? 0);
+    const v2 = Number(r.fly2_speed_pxsec ?? r.fly2_speed ?? 0);
+    const dist = prismDistance(r);''',
+    '''    const v1 = prismVelocity(r, 'fly1');
+    const v2 = prismVelocity(r, 'fly2');
+    const dist = prismDistance(r);''',
+    'blank invalid Prism velocity',
+)
+write(app_path, app)
+
+# ---------------------------------------------------------------------------
+# Tests.
+# ---------------------------------------------------------------------------
+utils_test_path = 'source app folder/dashboard/tests/server-utils.test.js'
+utils_test = read(utils_test_path)
+utils_test = replace_once(
+    utils_test,
+    '''import {
+  buildTrackerArgs,
+  parseTrackerSync,
+  prepareRunHistoryBundle,''',
+    '''import {
+  assertEventBelongsToRun,
+  buildTrackerArgs,
+  parseTrackerSync,
+  prepareRunHistoryBundle,''',
+    'utils test event import',
+)
+utils_test = replace_once(
+    utils_test,
