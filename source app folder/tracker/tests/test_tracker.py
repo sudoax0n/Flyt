@@ -1,4 +1,5 @@
 import importlib.util
+import math
 import pathlib
 import unittest
 
@@ -31,6 +32,10 @@ class TrackerTests(unittest.TestCase):
     def test_initial_detection_has_zero_velocity(self):
         self.assertEqual(tracker.displacement((0, 0), (100, 100), False), 0.0)
         self.assertEqual(tracker.displacement((0, 0), (3, 4), True), 5.0)
+
+    def test_invalid_observation_speed_is_missing(self):
+        self.assertTrue(math.isnan(tracker.observed_speed(25.0, 0)))
+        self.assertEqual(tracker.observed_speed(25.0, 1), 25.0)
 
     def test_separate_confident_close_flies_generate_courtship(self):
         rows = [row(i, proximity=20, confidence=0.8) for i in range(5)]

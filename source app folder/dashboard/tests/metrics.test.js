@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { computeAverageProximity, prismDistance, proximityValue } from '../src/metrics.js';
+import {
+  computeAverageProximity,
+  prismDistance,
+  prismVelocity,
+  proximityValue,
+} from '../src/metrics.js';
 
 test('carried coordinates from missing detections do not bias proximity metrics', () => {
   const rows = [
@@ -18,4 +23,23 @@ test('legacy rows remain valid only when they contain a finite non-occluded obse
   assert.equal(proximityValue({ proximity_distance: 12, occlusion_flag: 0 }), 12);
   assert.equal(proximityValue({ proximity_distance: '', occlusion_flag: 0 }), null);
   assert.equal(proximityValue({ proximity_distance: 0, occlusion_flag: 1 }), null);
+});
+
+
+test('invalid or merged observations export blank individual-fly velocities', () => {
+  const invalid = {
+    tracking_valid: 0,
+    detection_count: 1,
+    occlusion_flag: 1,
+    fly1_speed_pxsec: 120,
+    fly2_speed_pxsec: 95,
+  };
+  assert.equal(prismVelocity(invalid, 'fly1'), '');
+  assert.equal(prismVelocity(invalid, 'fly2'), '');
+  assert.equal(prismVelocity({
+    tracking_valid: 1,
+    detection_count: 2,
+    occlusion_flag: 0,
+    fly1_speed_pxsec: 42.5,
+  }, 'fly1'), 42.5);
 });

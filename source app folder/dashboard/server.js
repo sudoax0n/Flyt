@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import {
   AbortRunError,
+  assertEventBelongsToRun,
   buildTrackerArgs,
   createRunId,
   countCsvRows,
@@ -19,6 +20,7 @@ import {
   readEventsFps,
   readJson,
   recoverPublishArtifacts,
+  recoverRuntimeArtifacts,
   resolveVerificationPath,
   scopeEventsForRun,
   runCommand,
@@ -88,13 +90,17 @@ export function createFlytServer(options = {}) {
   const killOptions = options.killOptions || { graceMs: 1000, hardKillMs: 3000 };
 
   for (const dir of [uploadsDir, publicDir, historyDir]) ensureDir(dir);
+  recoverRuntimeArtifacts(uploadsDir);
   recoverPublishArtifacts(publicDir);
 
   const app = express();
   const storage = multer.diskStorage({
     destination: (_req, _file, callback) => callback(null, uploadsDir),
-    filename: (_req, file, callback) => {
-      callback(null, `input-${Date.now()}-${randomUUID()}${path.extname(file.originalname).toLowerCase()}`);
+    filename: (req, file, callback) => {
+      const filename = `input-${Date.now()}-${randomUUID()}${path.extname(file.originalname).toLowerCase()}`;
+      const state = pendingUploads.get(req);
+      if (state) state.filePath = path.join(uploadsDir, filename);
+      callback(null, filename);
     },
   });
   const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 * 1024 } });
@@ -119,6 +125,7 @@ export function createFlytServer(options = {}) {
   let terminating = false;
   let activeRun = null;
   let job = blankJob();
+  const pendingUploads = new Map();
 
   const services = {
     countFrames: options.services?.countFrames || ((filePath, context) => getVideoFrameCount(
@@ -186,12 +193,22 @@ export function createFlytServer(options = {}) {
     req.uploadEpoch = epoch;
     uploadReserved = true;
     let released = false;
-    const release = () => {
-      if (!released) {
-        released = true;
-        uploadReserved = false;
-      }
+    let resolveClosed;
+    const state = {
+      request: req,
+      filePath: null,
+      closed: new Promise((resolve) => { resolveClosed = resolve; }),
+      release: null,
     };
+    const release = () => {
+      if (released) return;
+      released = true;
+      pendingUploads.delete(req);
+      uploadReserved = pendingUploads.size > 0;
+    };
+    state.release = release;
+    pendingUploads.set(req, state);
+    req.once('close', () => resolveClosed());
     res.once('finish', release);
     res.once('close', release);
     return next();
@@ -202,31 +219,82 @@ export function createFlytServer(options = {}) {
     return Array.isArray(data.reviews) ? data : { version: 1, reviews: [] };
   }
 
+  function waitForUploadClose(state) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Multipart upload did not close after reset')), 3000);
+      timer.unref?.();
+      state.closed.then(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
+  async function removePendingUploadFile(filePath) {
+    if (!filePath) return;
+    let lastError = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        fs.rmSync(filePath, { force: true });
+        if (!fs.existsSync(filePath)) return;
+        lastError = new Error(`Could not remove cancelled upload: ${filePath}`);
+      } catch (error) {
+        lastError = error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw lastError || new Error(`Could not remove cancelled upload: ${filePath}`);
+  }
+
+  async function abortPendingUploads(states) {
+    states.forEach((state) => {
+      if (!state.request.destroyed) state.request.destroy();
+    });
+    await Promise.all(states.map(async (state) => {
+      await waitForUploadClose(state);
+      await removePendingUploadFile(state.filePath);
+      state.release();
+    }));
+  }
+
   async function stopActiveRun() {
     epoch += 1;
     const context = activeRun;
+    const uploadStates = [...pendingUploads.values()];
     activeRun = null;
-    job = { ...blankJob(), status: context ? 'stopping' : 'idle' };
-    if (!context) return;
+    const hasWork = Boolean(context) || uploadStates.length > 0;
+    job = { ...blankJob(), status: hasWork ? 'stopping' : 'idle' };
+    if (!hasWork) return;
 
     terminating = true;
-    context.controller.abort();
+    context?.controller.abort();
+    let stoppedCleanly = false;
     try {
-      const children = [...context.children];
-      await Promise.all(children.map((child) => terminateChild(child, killOptions)));
-      await context.done.catch((error) => {
-        if (error?.name !== 'AbortError') throw error;
-      });
+      const children = context ? [...context.children] : [];
+      await Promise.all([
+        abortPendingUploads(uploadStates),
+        ...children.map((child) => terminateChild(child, killOptions)),
+      ]);
+      if (context) {
+        await context.done.catch((error) => {
+          if (error?.name !== 'AbortError') throw error;
+        });
+      }
       job = blankJob();
+      stoppedCleanly = true;
     } catch (error) {
       job = {
         ...blankJob(),
         status: 'error',
-        error: `Could not terminate active run: ${error.message}`,
+        error: `Could not terminate active work: ${error.message}`,
       };
       throw error;
     } finally {
-      if (context.children.size === 0) terminating = false;
+      if (
+        stoppedCleanly
+        && (!context || context.children.size === 0)
+        && pendingUploads.size === 0
+      ) terminating = false;
     }
   }
 
@@ -436,6 +504,7 @@ export function createFlytServer(options = {}) {
       return res.status(400).json({ error: 'Body must include eventId and verdict.' });
     }
     try {
+      assertEventBelongsToRun(eventId, historyDir);
       const filePath = resolveVerificationPath(eventId, historyDir);
       const data = readVerification(filePath);
       const review = { event_id: eventId, verdict, reviewed_at: new Date().toISOString() };
@@ -479,7 +548,14 @@ export function createFlytServer(options = {}) {
   return {
     app,
     stop: stopActiveRun,
-    getState: () => ({ epoch, uploadReserved, terminating, activeRun, job: { ...job } }),
+    getState: () => ({
+      epoch,
+      uploadReserved,
+      terminating,
+      pendingUploads: pendingUploads.size,
+      activeRun,
+      job: { ...job },
+    }),
     paths: { uploadsDir, publicDir, historyDir, historyMetaPath, verificationPath },
   };
 }

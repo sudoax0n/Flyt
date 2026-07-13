@@ -129,7 +129,7 @@ test('rejects a simultaneous upload before a second file is accepted', async (t)
   assert.equal(gate.aborted, true);
 });
 
-test('reset during a multipart upload invalidates and removes the partial upload', async (t) => {
+test('reset actively aborts a stalled multipart upload and reopens the gate', async (t) => {
   const harness = await createHarness(standardServices());
   t.after(() => harness.close());
   const boundary = '----flyt-boundary';
@@ -140,32 +140,39 @@ test('reset during a multipart upload invalidates and removes the partial upload
     '',
     'partial-video-',
   ].join('\r\n');
-  const suffix = `\r\n--${boundary}--\r\n`;
 
-  let finishUpload;
-  const uploadResponse = new Promise((resolve, reject) => {
+  const uploadOutcome = new Promise((resolve) => {
     const request = http.request(`${harness.baseUrl}/api/upload`, {
       method: 'POST',
       headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
     }, (response) => {
       response.resume();
-      response.on('end', () => resolve(response));
+      response.on('end', () => resolve(response.statusCode));
     });
-    request.on('error', reject);
+    request.on('error', () => resolve('aborted'));
     request.write(prefix);
-    finishUpload = () => request.end(`remaining${suffix}`);
   });
 
   await new Promise((resolve) => setTimeout(resolve, 30));
   const reset = await fetch(`${harness.baseUrl}/api/reset`, { method: 'POST' });
   assert.equal(reset.status, 200);
-  finishUpload();
-  const response = await uploadResponse;
-  assert.equal(response.statusCode, 409);
+  const outcome = await Promise.race([
+    uploadOutcome,
+    new Promise((resolve) => setTimeout(() => resolve('timeout'), 1000)),
+  ]);
+  assert.notEqual(outcome, 'timeout');
+  assert.ok(outcome === 'aborted' || outcome === 409);
   assert.equal(
     fs.readdirSync(harness.paths.uploadsDir).filter((name) => name.startsWith('input-')).length,
     0,
   );
+  const state = harness.getState();
+  assert.equal(state.pendingUploads, 0);
+  assert.equal(state.uploadReserved, false);
+  assert.equal(state.terminating, false);
+
+  assert.equal((await upload(harness.baseUrl, 'after-reset.mp4')).status, 200);
+  await waitForStatus(harness.baseUrl, 'done');
 });
 
 test('reset remains pending until the active stage has actually stopped', async (t) => {
@@ -290,6 +297,13 @@ test('a verdict made on the current run survives subsequent runs and history rel
     body: JSON.stringify({ eventId: 'evt-001', verdict: 'confirmed' }),
   });
   assert.equal(unscopedResponse.status, 400);
+
+  const orphanResponse = await fetch(`${harness.baseUrl}/api/verification`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ eventId: `${firstRunId}:evt-does-not-exist`, verdict: 'confirmed' }),
+  });
+  assert.equal(orphanResponse.status, 400);
 
   assert.equal((await upload(harness.baseUrl, 'second.mp4')).status, 200);
   const secondStatus = await waitForStatus(harness.baseUrl, 'done');

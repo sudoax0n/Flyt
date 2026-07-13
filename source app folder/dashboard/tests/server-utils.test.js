@@ -5,12 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
+  assertEventBelongsToRun,
   buildTrackerArgs,
   parseTrackerSync,
   prepareRunHistoryBundle,
   publishBundle,
   readCsvAvgProximity,
   recoverPublishArtifacts,
+  recoverRuntimeArtifacts,
   resolveVerificationPath,
   runCommand,
   scopeEventsForRun,
@@ -204,7 +206,109 @@ test('history bundle uses scoped events and excludes invalid proximity observati
     path.join(historyDir, runId, 'verification.json'),
   );
   assert.equal(verificationPathForRun(runId, historyDir), path.join(historyDir, runId, 'verification.json'));
+  assert.equal(assertEventBelongsToRun(`${runId}:evt-001`, historyDir), runId);
+  assert.throws(
+    () => assertEventBelongsToRun(`${runId}:evt-does-not-exist`, historyDir),
+    /does not belong/,
+  );
   assert.throws(() => resolveVerificationPath('evt-001', historyDir), /Run-scoped event ID required/);
+});
+
+test('rollback remains fail-closed when a new destination cannot be deleted', () => {
+  const dir = tempDir('flyt-delete-failure-');
+  const source = path.join(dir, 'source');
+  const destination = path.join(dir, 'new-destination');
+  const manifestPath = path.join(dir, '.flyt-publish-delete-failure.json');
+  fs.writeFileSync(source, 'new-data');
+  let blockDestinationRemoval = true;
+  const removeFile = (filePath) => {
+    if (blockDestinationRemoval && filePath === destination) {
+      throw new Error('injected deletion failure');
+    }
+    fs.rmSync(filePath, { force: true });
+    if (fs.existsSync(filePath)) throw new Error(`still exists: ${filePath}`);
+  };
+
+  assert.throws(() => publishBundle([
+    { source, destination },
+  ], 'delete-failure', {
+    manifestDir: dir,
+    removeFile,
+    faultInjector(stage) {
+      if (stage === 'published') throw new Error('injected publish failure');
+    },
+  }), /rollback was incomplete/);
+  assert.equal(fs.readFileSync(destination, 'utf8'), 'new-data');
+  assert.equal(fs.existsSync(manifestPath), true);
+
+  blockDestinationRemoval = false;
+  recoverPublishArtifacts(dir);
+  assert.equal(fs.existsSync(destination), false);
+  assert.equal(fs.existsSync(manifestPath), false);
+});
+
+test('startup runtime recovery removes abandoned inputs and run workspaces only', () => {
+  const dir = tempDir('flyt-runtime-recovery-');
+  fs.writeFileSync(path.join(dir, 'input-stale.mp4'), 'partial');
+  fs.mkdirSync(path.join(dir, 'run-stale'));
+  fs.writeFileSync(path.join(dir, 'run-stale', 'data.tmp'), 'partial');
+  fs.writeFileSync(path.join(dir, 'keep.txt'), 'keep');
+
+  recoverRuntimeArtifacts(dir);
+  assert.equal(fs.existsSync(path.join(dir, 'input-stale.mp4')), false);
+  assert.equal(fs.existsSync(path.join(dir, 'run-stale')), false);
+  assert.equal(fs.readFileSync(path.join(dir, 'keep.txt'), 'utf8'), 'keep');
+});
+
+test('termination error without close rejects and never proves process exit', async () => {
+  class ErrorOnlyChild extends EventEmitter {
+    constructor() {
+      super();
+      this.exitCode = null;
+      this.signalCode = null;
+    }
+    kill() {
+      setTimeout(() => this.emit('error', new Error('signal delivery failed')), 1);
+      return true;
+    }
+  }
+  const child = new ErrorOnlyChild();
+  await assert.rejects(
+    terminateChild(child, { graceMs: 20, hardKillMs: 20 }),
+    /termination failed before close/,
+  );
+  assert.equal(child.exitCode, null);
+  assert.equal(child.signalCode, null);
+});
+
+test('runCommand keeps an unclosed child tracked after termination failure', async () => {
+  class ErrorOnlyChild extends EventEmitter {
+    constructor() {
+      super();
+      this.exitCode = null;
+      this.signalCode = null;
+      this.pid = 123;
+    }
+    kill() {
+      setTimeout(() => this.emit('error', new Error('kill failed')), 1);
+      return true;
+    }
+  }
+  const child = new ErrorOnlyChild();
+  const controller = new AbortController();
+  const children = new Set();
+  const command = runCommand('fake', [], {
+    spawnFn: () => child,
+    signal: controller.signal,
+    children,
+    killOptions: { graceMs: 20, hardKillMs: 20 },
+  });
+  controller.abort();
+  await assert.rejects(command, /termination failed before close/);
+  assert.equal(children.has(child), true);
+  child.exitCode = 1;
+  child.emit('close', 1, null);
+  assert.equal(children.size, 0);
 });
 
 test('termination escalates to SIGKILL and resolves only after close', async () => {

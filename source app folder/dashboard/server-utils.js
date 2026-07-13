@@ -28,6 +28,23 @@ export function safeRemoveDir(dirPath) {
   }
 }
 
+export function removeTransactionalFile(filePath) {
+  if (!filePath) return;
+  fs.rmSync(filePath, { force: true });
+  if (fs.existsSync(filePath)) {
+    throw new Error(`Could not remove transactional path: ${filePath}`);
+  }
+}
+
+export function recoverRuntimeArtifacts(uploadsDir) {
+  ensureDir(uploadsDir);
+  fs.readdirSync(uploadsDir, { withFileTypes: true }).forEach((entry) => {
+    const fullPath = path.join(uploadsDir, entry.name);
+    if (entry.isFile() && entry.name.startsWith('input-')) safeUnlink(fullPath);
+    else if (entry.isDirectory() && entry.name.startsWith('run-')) safeRemoveDir(fullPath);
+  });
+}
+
 export function readJson(filePath, fallback) {
   if (!fs.existsSync(filePath)) return fallback;
   try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch { return fallback; }
@@ -109,8 +126,15 @@ export function validateFrameIntegrity({
 
 const terminationPromises = new WeakMap();
 
+function childHasExited(child) {
+  return Boolean(child) && (
+    (child.exitCode !== null && child.exitCode !== undefined)
+    || Boolean(child.signalCode)
+  );
+}
+
 export function terminateChild(child, { graceMs = 1000, hardKillMs = 3000 } = {}) {
-  if (!child || child.exitCode !== null || child.signalCode) return Promise.resolve();
+  if (!child || childHasExited(child)) return Promise.resolve();
   if (terminationPromises.has(child)) return terminationPromises.get(child);
 
   const promise = new Promise((resolve, reject) => {
@@ -121,7 +145,7 @@ export function terminateChild(child, { graceMs = 1000, hardKillMs = 3000 } = {}
       clearTimeout(graceTimer);
       clearTimeout(hardTimer);
       child.removeListener('close', finish);
-      child.removeListener('error', finish);
+      child.removeListener('error', onError);
     };
     const finish = () => {
       if (settled) return;
@@ -129,20 +153,44 @@ export function terminateChild(child, { graceMs = 1000, hardKillMs = 3000 } = {}
       cleanup();
       resolve();
     };
-    const fail = () => {
+    const fail = (error) => {
       if (settled) return;
       settled = true;
       cleanup();
-      reject(new Error('Child process did not terminate after SIGKILL'));
+      reject(error);
+    };
+    const onError = (error) => {
+      if (childHasExited(child)) finish();
+      else fail(new Error(`Child process termination failed before close: ${error.message}`));
+    };
+    const sendSignal = (signal) => {
+      try {
+        const delivered = child.kill(signal);
+        if (delivered === false && !childHasExited(child)) {
+          fail(new Error(`Could not deliver ${signal} to child process`));
+          return false;
+        }
+      } catch (error) {
+        if (childHasExited(child)) finish();
+        else fail(new Error(`Could not deliver ${signal} to child process: ${error.message}`));
+        return false;
+      }
+      return true;
     };
 
     child.once('close', finish);
-    child.once('error', finish);
-    try { child.kill('SIGTERM'); } catch { finish(); return; }
+    child.once('error', onError);
+    if (!sendSignal('SIGTERM')) return;
     graceTimer = setTimeout(() => {
-      if (settled) return;
-      try { child.kill('SIGKILL'); } catch { finish(); return; }
-      hardTimer = setTimeout(fail, hardKillMs);
+      if (settled || childHasExited(child)) {
+        if (childHasExited(child)) finish();
+        return;
+      }
+      if (!sendSignal('SIGKILL')) return;
+      hardTimer = setTimeout(() => {
+        if (childHasExited(child)) finish();
+        else fail(new Error('Child process did not close after SIGKILL'));
+      }, hardKillMs);
       hardTimer.unref?.();
     }, graceMs);
     graceTimer.unref?.();
@@ -174,21 +222,22 @@ export function runCommand(command, args, {
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let processError = null;
 
-    const cleanup = () => {
-      children?.delete(child);
+    const cleanup = ({ removeChild = true } = {}) => {
+      if (removeChild) children?.delete(child);
       signal?.removeEventListener('abort', onAbort);
     };
-    const settle = (handler, value) => {
+    const settle = (handler, value, options) => {
       if (settled) return;
       settled = true;
-      cleanup();
+      cleanup(options);
       handler(value);
     };
     const onAbort = () => {
       terminateChild(child, killOptions)
-        .then(() => settle(reject, new AbortRunError()))
-        .catch((error) => settle(reject, error));
+        .then(() => settle(reject, new AbortRunError(), { removeChild: true }))
+        .catch((error) => settle(reject, error, { removeChild: childHasExited(child) }));
     };
 
     child.stdout?.on('data', (chunk) => {
@@ -201,10 +250,18 @@ export function runCommand(command, args, {
       stderr += text;
       onStderr?.(text);
     });
-    child.once('error', (error) => settle(reject, error));
+    child.once('error', (error) => {
+      processError = error;
+      if (!child.pid || childHasExited(child)) {
+        settle(reject, error, { removeChild: true });
+      }
+    });
     child.once('close', (code, closeSignal) => {
-      if (signal?.aborted) settle(reject, new AbortRunError());
-      else settle(resolve, { code, signal: closeSignal, stdout, stderr });
+      children?.delete(child);
+      if (settled) return;
+      if (signal?.aborted) settle(reject, new AbortRunError(), { removeChild: true });
+      else if (processError) settle(reject, processError, { removeChild: true });
+      else settle(resolve, { code, signal: closeSignal, stdout, stderr }, { removeChild: true });
     });
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
@@ -276,23 +333,23 @@ function validatePublishManifest(manifest, manifestPath) {
   return manifest;
 }
 
-function rollbackPublishManifest(manifest) {
+function rollbackPublishManifest(manifest, { removeFile = removeTransactionalFile } = {}) {
   const errors = [];
   [...manifest.entries].reverse().forEach((entry) => {
     try {
       if (entry.hadDestination) {
         if (fs.existsSync(entry.backup)) {
-          safeUnlink(entry.destination);
+          removeFile(entry.destination);
           ensureDir(path.dirname(entry.destination));
           fs.renameSync(entry.backup, entry.destination);
         } else if (!fs.existsSync(entry.destination)) {
           throw new Error(`Cannot restore missing prior destination: ${entry.destination}`);
         }
       } else {
-        safeUnlink(entry.destination);
-        safeUnlink(entry.backup);
+        removeFile(entry.destination);
+        removeFile(entry.backup);
       }
-      safeUnlink(entry.stage);
+      removeFile(entry.stage);
     } catch (error) {
       errors.push(error);
     }
@@ -302,15 +359,15 @@ function rollbackPublishManifest(manifest) {
   }
 }
 
-function finalizeCommittedManifest(manifest) {
+function finalizeCommittedManifest(manifest, { removeFile = removeTransactionalFile } = {}) {
   const missing = manifest.entries.filter((entry) => !fs.existsSync(entry.destination));
   if (missing.length) {
-    rollbackPublishManifest(manifest);
+    rollbackPublishManifest(manifest, { removeFile });
     return;
   }
   manifest.entries.forEach((entry) => {
-    safeUnlink(entry.stage);
-    safeUnlink(entry.backup);
+    removeFile(entry.stage);
+    removeFile(entry.backup);
   });
 }
 
@@ -325,7 +382,11 @@ function listFilesRecursive(directory) {
   return files;
 }
 
-export function publishBundle(entries, token, { faultInjector, manifestDir } = {}) {
+export function publishBundle(entries, token, {
+  faultInjector,
+  manifestDir,
+  removeFile = removeTransactionalFile,
+} = {}) {
   const manifestPath = publishManifestPath(entries, token, manifestDir);
   const manifest = {
     version: 1,
@@ -364,13 +425,14 @@ export function publishBundle(entries, token, { faultInjector, manifestDir } = {
     writeJson(manifestPath, manifest);
     faultInjector?.('committed', -1);
 
-    finalizeCommittedManifest(manifest);
-    safeUnlink(manifestPath);
+    finalizeCommittedManifest(manifest, { removeFile });
+    removeFile(manifestPath);
   } catch (error) {
     if (error instanceof SimulatedProcessCrash) throw error;
+    if (manifest.state === 'committed') throw error;
     try {
-      rollbackPublishManifest(manifest);
-      safeUnlink(manifestPath);
+      rollbackPublishManifest(manifest, { removeFile });
+      removeFile(manifestPath);
     } catch (rollbackError) {
       throw new globalThis.AggregateError([error, rollbackError], 'Publication failed and rollback was incomplete');
     }
@@ -378,7 +440,7 @@ export function publishBundle(entries, token, { faultInjector, manifestDir } = {
   }
 }
 
-export function recoverPublishArtifacts(directory) {
+export function recoverPublishArtifacts(directory, { removeFile = removeTransactionalFile } = {}) {
   if (!fs.existsSync(directory)) return;
   const manifests = fs.readdirSync(directory)
     .filter((name) => /^\.flyt-publish-[A-Za-z0-9-]+\.json$/.test(name))
@@ -386,9 +448,9 @@ export function recoverPublishArtifacts(directory) {
 
   manifests.forEach((manifestPath) => {
     const manifest = validatePublishManifest(readJson(manifestPath, null), manifestPath);
-    if (manifest.state === 'committed') finalizeCommittedManifest(manifest);
-    else rollbackPublishManifest(manifest);
-    safeUnlink(manifestPath);
+    if (manifest.state === 'committed') finalizeCommittedManifest(manifest, { removeFile });
+    else rollbackPublishManifest(manifest, { removeFile });
+    removeFile(manifestPath);
   });
 
   const artifacts = listFilesRecursive(directory);
@@ -398,7 +460,7 @@ export function recoverPublishArtifacts(directory) {
       `Unrecoverable publication backups without a transaction manifest: ${orphanBackups.join(', ')}`,
     );
   }
-  artifacts.filter((filePath) => filePath.endsWith('.new')).forEach(safeUnlink);
+  artifacts.filter((filePath) => filePath.endsWith('.new')).forEach((filePath) => removeFile(filePath));
 }
 
 export function buildTrackerArgs(trackerScript, inputPath, outputs, overrides = {}, defaults) {
@@ -559,6 +621,15 @@ export function prepareRunHistoryBundle({
   };
 }
 
+export function runIdFromEventId(eventId) {
+  const value = String(eventId);
+  const separator = value.indexOf(':');
+  if (separator <= 0 || separator === value.length - 1) {
+    throw new Error('Run-scoped event ID required');
+  }
+  return requireRunId(value.slice(0, separator));
+}
+
 export function verificationPathForRun(runId, historyDir, { mustExist = true } = {}) {
   const safeRunId = requireRunId(runId);
   const root = path.resolve(historyDir);
@@ -568,10 +639,27 @@ export function verificationPathForRun(runId, historyDir, { mustExist = true } =
   return filePath;
 }
 
-export function resolveVerificationPath(eventId, historyDir) {
-  const separator = String(eventId).indexOf(':');
-  if (separator <= 0 || separator === String(eventId).length - 1) {
-    throw new Error('Run-scoped event ID required');
+export function eventsPathForRun(runId, historyDir, { mustExist = true } = {}) {
+  const safeRunId = requireRunId(runId);
+  const root = path.resolve(historyDir);
+  const filePath = path.resolve(root, safeRunId, 'events.json');
+  if (!filePath.startsWith(`${root}${path.sep}`)) throw new Error('Events path escaped history root');
+  if (mustExist && !fs.existsSync(filePath)) throw new Error('Run events file not found');
+  return filePath;
+}
+
+export function assertEventBelongsToRun(eventId, historyDir) {
+  const value = String(eventId);
+  const runId = runIdFromEventId(value);
+  const events = readJson(eventsPathForRun(runId, historyDir), null);
+  if (!events || !Array.isArray(events.events)) throw new Error('Run events file is invalid');
+  if (events.run_id && events.run_id !== runId) throw new Error('Run events file has a mismatched run ID');
+  if (!events.events.some((event) => String(event.id) === value)) {
+    throw new Error('Event does not belong to the referenced run');
   }
-  return verificationPathForRun(String(eventId).slice(0, separator), historyDir);
+  return runId;
+}
+
+export function resolveVerificationPath(eventId, historyDir) {
+  return verificationPathForRun(runIdFromEventId(eventId), historyDir);
 }

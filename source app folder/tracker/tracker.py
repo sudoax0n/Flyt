@@ -189,6 +189,10 @@ def displacement(previous, current, was_initialized: bool) -> float:
     return float(math.dist(current, previous)) if was_initialized else 0.0
 
 
+def observed_speed(speed: float, tracking_valid: int) -> float:
+    return float(speed) if tracking_valid else math.nan
+
+
 def assignment_confidence(ca, cb, prev_f1, prev_f2) -> float:
     direct = float(math.dist(ca, prev_f1) + math.dist(cb, prev_f2))
     swapped = float(math.dist(ca, prev_f2) + math.dist(cb, prev_f1))
@@ -305,7 +309,7 @@ def run_tracker(args: argparse.Namespace) -> int:
                 areas.append(float(cv2.contourArea(contour)))
 
             f1_coords = f2_coords = (0, 0)
-            f1_speed = f2_speed = 0.0
+            f1_speed = f2_speed = math.nan
             proximity = math.nan
             occlusion_flag = 0
             identity_confidence = 0.0
@@ -333,6 +337,8 @@ def run_tracker(args: argparse.Namespace) -> int:
                 if was_initialized:
                     f1_speed = displacement(prev_f1, f1_coords, was_initialized)
                     f2_speed = displacement(prev_f2, f2_coords, was_initialized)
+                else:
+                    f1_speed = f2_speed = 0.0
                 proximity = float(math.dist(f1_coords, f2_coords))
                 tracking_valid = 1
                 prev_f1, prev_f2 = f1_coords, f2_coords
@@ -362,9 +368,6 @@ def run_tracker(args: argparse.Namespace) -> int:
                 occlusion_flag = 1
                 identity_confidence = 0.0
                 fly1_area = fly2_area = areas[0]
-                if was_initialized:
-                    f1_speed = displacement(prev_f1, point, was_initialized)
-                    f2_speed = displacement(prev_f2, point, was_initialized)
                 prev_f1 = prev_f2 = point
                 is_initialized = True
                 if out:
@@ -385,16 +388,18 @@ def run_tracker(args: argparse.Namespace) -> int:
                 f1_coords, f2_coords = prev_f1, prev_f2
                 identity_confidence = 0.0
 
+            measured_f1_speed = observed_speed(f1_speed, tracking_valid)
+            measured_f2_speed = observed_speed(f2_speed, tracking_valid)
             data.append({
                 "frame": frame_num,
                 "fly1_x": f1_coords[0],
                 "fly1_y": f1_coords[1],
                 "fly2_x": f2_coords[0],
                 "fly2_y": f2_coords[1],
-                "fly1_speed": f1_speed,
-                "fly2_speed": f2_speed,
-                "fly1_speed_pxsec": round(f1_speed * effective_fps, 4),
-                "fly2_speed_pxsec": round(f2_speed * effective_fps, 4),
+                "fly1_speed": measured_f1_speed,
+                "fly2_speed": measured_f2_speed,
+                "fly1_speed_pxsec": round(measured_f1_speed * effective_fps, 4),
+                "fly2_speed_pxsec": round(measured_f2_speed * effective_fps, 4),
                 "activity_level": activity_level,
                 "proximity_distance": proximity,
                 "tracking_valid": tracking_valid,

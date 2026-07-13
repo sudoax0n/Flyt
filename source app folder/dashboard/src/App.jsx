@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Papa from 'papaparse';
-import { prismDistance, proximityValue } from './metrics.js';
+import { prismDistance, prismVelocity, proximityValue } from './metrics.js';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, 
   ScatterChart, Scatter, ZAxis
@@ -65,8 +65,8 @@ function exportPrismCsv(rows, fps) {
   const lines = [header.join(',')];
   rows.forEach((r) => {
     const t = Number(r.frame) / effectiveFps;
-    const v1 = Number(r.fly1_speed_pxsec ?? r.fly1_speed ?? 0);
-    const v2 = Number(r.fly2_speed_pxsec ?? r.fly2_speed ?? 0);
+    const v1 = prismVelocity(r, 'fly1');
+    const v2 = prismVelocity(r, 'fly2');
     const dist = prismDistance(r);
     lines.push([t, v1, v2, dist].map(csvEscape).join(','));
   });
