@@ -63,7 +63,20 @@ jobs:
 
       - name: Lint backend and tests
         working-directory: source app folder/dashboard
-        run: npm run lint:backend
+        run: |
+          set +e
+          npm run lint:backend > ../../.github/final-hardening-diagnostics.txt 2>&1
+          status=$?
+          cat ../../.github/final-hardening-diagnostics.txt
+          if [ "$status" -ne 0 ]; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add ../../.github/final-hardening-diagnostics.txt
+            git commit -m 'chore: capture final hardening lint diagnostics'
+            git push origin HEAD:fix/critical-job-races
+            exit "$status"
+          fi
+          rm ../../.github/final-hardening-diagnostics.txt
 
       - name: Run utility, HTTP lifecycle, and metric tests
         working-directory: source app folder/dashboard
