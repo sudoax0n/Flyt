@@ -1,0 +1,373 @@
+from pathlib import Path
+
+ROOT = Path('.')
+
+
+def read(path: str) -> str:
+    return (ROOT / path).read_text(encoding='utf-8')
+
+
+def write(path: str, content: str) -> None:
+    (ROOT / path).write_text(content, encoding='utf-8')
+
+
+def replace_once(content: str, old: str, new: str, label: str) -> str:
+    count = content.count(old)
+    if count != 1:
+        raise RuntimeError(f'{label}: expected one occurrence, found {count}')
+    return content.replace(old, new, 1)
+
+
+# ---------------------------------------------------------------------------
+# server-utils.js: strict termination, strict transaction deletion, runtime
+# cleanup, and event membership validation.
+# ---------------------------------------------------------------------------
+utils_path = 'source app folder/dashboard/server-utils.js'
+utils = read(utils_path)
+
+utils = replace_once(
+    utils,
+    '''export function safeRemoveDir(dirPath) {
+  if (!dirPath) return;
+  try { fs.rmSync(dirPath, { recursive: true, force: true }); } catch (error) {
+    console.error(`[Server] Failed to remove ${dirPath}: ${error.message}`);
+  }
+}
+
+export function readJson(filePath, fallback) {''',
+    '''export function safeRemoveDir(dirPath) {
+  if (!dirPath) return;
+  try { fs.rmSync(dirPath, { recursive: true, force: true }); } catch (error) {
+    console.error(`[Server] Failed to remove ${dirPath}: ${error.message}`);
+  }
+}
+
+export function removeTransactionalFile(filePath) {
+  if (!filePath) return;
+  fs.rmSync(filePath, { force: true });
+  if (fs.existsSync(filePath)) {
+    throw new Error(`Could not remove transactional path: ${filePath}`);
+  }
+}
+
+export function recoverRuntimeArtifacts(uploadsDir) {
+  ensureDir(uploadsDir);
+  fs.readdirSync(uploadsDir, { withFileTypes: true }).forEach((entry) => {
+    const fullPath = path.join(uploadsDir, entry.name);
+    if (entry.isFile() && entry.name.startsWith('input-')) safeUnlink(fullPath);
+    else if (entry.isDirectory() && entry.name.startsWith('run-')) safeRemoveDir(fullPath);
+  });
+}
+
+export function readJson(filePath, fallback) {''',
+    'insert strict deletion and runtime recovery',
+)
+
+utils = replace_once(
+    utils,
+    '''const terminationPromises = new WeakMap();
+
+export function terminateChild(child, { graceMs = 1000, hardKillMs = 3000 } = {}) {
+  if (!child || child.exitCode !== null || child.signalCode) return Promise.resolve();
+  if (terminationPromises.has(child)) return terminationPromises.get(child);
+
+  const promise = new Promise((resolve, reject) => {
+    let settled = false;
+    let graceTimer;
+    let hardTimer;
+    const cleanup = () => {
+      clearTimeout(graceTimer);
+      clearTimeout(hardTimer);
+      child.removeListener('close', finish);
+      child.removeListener('error', finish);
+    };
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error('Child process did not terminate after SIGKILL'));
+    };
+
+    child.once('close', finish);
+    child.once('error', finish);
+    try { child.kill('SIGTERM'); } catch { finish(); return; }
+    graceTimer = setTimeout(() => {
+      if (settled) return;
+      try { child.kill('SIGKILL'); } catch { finish(); return; }
+      hardTimer = setTimeout(fail, hardKillMs);
+      hardTimer.unref?.();
+    }, graceMs);
+    graceTimer.unref?.();
+  }).finally(() => terminationPromises.delete(child));
+
+  terminationPromises.set(child, promise);
+  return promise;
+}
+''',
+    '''const terminationPromises = new WeakMap();
+
+function childHasExited(child) {
+  return Boolean(child) && (
+    (child.exitCode !== null && child.exitCode !== undefined)
+    || Boolean(child.signalCode)
+  );
+}
+
+export function terminateChild(child, { graceMs = 1000, hardKillMs = 3000 } = {}) {
+  if (!child || childHasExited(child)) return Promise.resolve();
+  if (terminationPromises.has(child)) return terminationPromises.get(child);
+
+  const promise = new Promise((resolve, reject) => {
+    let settled = false;
+    let graceTimer;
+    let hardTimer;
+    const cleanup = () => {
+      clearTimeout(graceTimer);
+      clearTimeout(hardTimer);
+      child.removeListener('close', finish);
+      child.removeListener('error', onError);
+    };
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const onError = (error) => {
+      if (childHasExited(child)) finish();
+      else fail(new Error(`Child process termination failed before close: ${error.message}`));
+    };
+    const sendSignal = (signal) => {
+      try {
+        const delivered = child.kill(signal);
+        if (delivered === false && !childHasExited(child)) {
+          fail(new Error(`Could not deliver ${signal} to child process`));
+          return false;
+        }
+      } catch (error) {
+        if (childHasExited(child)) finish();
+        else fail(new Error(`Could not deliver ${signal} to child process: ${error.message}`));
+        return false;
+      }
+      return true;
+    };
+
+    child.once('close', finish);
+    child.once('error', onError);
+    if (!sendSignal('SIGTERM')) return;
+    graceTimer = setTimeout(() => {
+      if (settled || childHasExited(child)) {
+        if (childHasExited(child)) finish();
+        return;
+      }
+      if (!sendSignal('SIGKILL')) return;
+      hardTimer = setTimeout(() => {
+        if (childHasExited(child)) finish();
+        else fail(new Error('Child process did not close after SIGKILL'));
+      }, hardKillMs);
+      hardTimer.unref?.();
+    }, graceMs);
+    graceTimer.unref?.();
+  }).finally(() => terminationPromises.delete(child));
+
+  terminationPromises.set(child, promise);
+  return promise;
+}
+''',
+    'strict terminateChild',
+)
+
+utils = replace_once(
+    utils,
+    '''export function runCommand(command, args, {
+  spawnFn = nodeSpawn,
+  signal,
+  children,
+  onStdout,
+  onStderr,
+  killOptions,
+} = {}) {
+  if (signal?.aborted) return Promise.reject(new AbortRunError());
+
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawnFn(command, args);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    children?.add(child);
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const cleanup = () => {
+      children?.delete(child);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const settle = (handler, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      handler(value);
+    };
+    const onAbort = () => {
+      terminateChild(child, killOptions)
+        .then(() => settle(reject, new AbortRunError()))
+        .catch((error) => settle(reject, error));
+    };
+
+    child.stdout?.on('data', (chunk) => {
+      const text = chunk.toString();
+      stdout += text;
+      onStdout?.(text);
+    });
+    child.stderr?.on('data', (chunk) => {
+      const text = chunk.toString();
+      stderr += text;
+      onStderr?.(text);
+    });
+    child.once('error', (error) => settle(reject, error));
+    child.once('close', (code, closeSignal) => {
+      if (signal?.aborted) settle(reject, new AbortRunError());
+      else settle(resolve, { code, signal: closeSignal, stdout, stderr });
+    });
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+  });
+}
+''',
+    '''export function runCommand(command, args, {
+  spawnFn = nodeSpawn,
+  signal,
+  children,
+  onStdout,
+  onStderr,
+  killOptions,
+} = {}) {
+  if (signal?.aborted) return Promise.reject(new AbortRunError());
+
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawnFn(command, args);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    children?.add(child);
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let processError = null;
+
+    const cleanup = ({ removeChild = true } = {}) => {
+      if (removeChild) children?.delete(child);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const settle = (handler, value, options) => {
+      if (settled) return;
+      settled = true;
+      cleanup(options);
+      handler(value);
+    };
+    const onAbort = () => {
+      terminateChild(child, killOptions)
+        .then(() => settle(reject, new AbortRunError(), { removeChild: true }))
+        .catch((error) => settle(reject, error, { removeChild: childHasExited(child) }));
+    };
+
+    child.stdout?.on('data', (chunk) => {
+      const text = chunk.toString();
+      stdout += text;
+      onStdout?.(text);
+    });
+    child.stderr?.on('data', (chunk) => {
+      const text = chunk.toString();
+      stderr += text;
+      onStderr?.(text);
+    });
+    child.once('error', (error) => {
+      processError = error;
+      if (!child.pid || childHasExited(child)) {
+        settle(reject, error, { removeChild: true });
+      }
+    });
+    child.once('close', (code, closeSignal) => {
+      children?.delete(child);
+      if (settled) return;
+      if (signal?.aborted) settle(reject, new AbortRunError(), { removeChild: true });
+      else if (processError) settle(reject, processError, { removeChild: true });
+      else settle(resolve, { code, signal: closeSignal, stdout, stderr }, { removeChild: true });
+    });
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+  });
+}
+''',
+    'preserve unclosed child after termination failure',
+)
+
+utils = replace_once(
+    utils,
+    '''function rollbackPublishManifest(manifest) {
+  const errors = [];
+  [...manifest.entries].reverse().forEach((entry) => {
+    try {
+      if (entry.hadDestination) {
+        if (fs.existsSync(entry.backup)) {
+          safeUnlink(entry.destination);
+          ensureDir(path.dirname(entry.destination));
+          fs.renameSync(entry.backup, entry.destination);
+        } else if (!fs.existsSync(entry.destination)) {
+          throw new Error(`Cannot restore missing prior destination: ${entry.destination}`);
+        }
+      } else {
+        safeUnlink(entry.destination);
+        safeUnlink(entry.backup);
+      }
+      safeUnlink(entry.stage);
+    } catch (error) {
+      errors.push(error);
+    }
+  });
+  if (errors.length) {
+    throw new globalThis.AggregateError(errors, 'Publication transaction rollback failed');
+  }
+}
+
+function finalizeCommittedManifest(manifest) {
+  const missing = manifest.entries.filter((entry) => !fs.existsSync(entry.destination));
+  if (missing.length) {
+    rollbackPublishManifest(manifest);
+    return;
+  }
+  manifest.entries.forEach((entry) => {
+    safeUnlink(entry.stage);
+    safeUnlink(entry.backup);
+  });
+}
+''',
+    '''function rollbackPublishManifest(manifest, { removeFile = removeTransactionalFile } = {}) {
+  const errors = [];
+  [...manifest.entries].reverse().forEach((entry) => {
+    try {
+      if (entry.hadDestination) {
+        if (fs.existsSync(entry.backup)) {
+          removeFile(entry.destination);
+          ensureDir(path.dirname(entry.destination));
+          fs.renameSync(entry.backup, entry.destination);
+        } else if (!fs.existsSync(entry.destination)) {
