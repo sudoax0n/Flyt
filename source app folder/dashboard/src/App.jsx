@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Papa from 'papaparse';
+import { prismDistance, prismVelocity, proximityValue } from './metrics.js';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, 
   ScatterChart, Scatter, ZAxis
@@ -64,9 +65,9 @@ function exportPrismCsv(rows, fps) {
   const lines = [header.join(',')];
   rows.forEach((r) => {
     const t = Number(r.frame) / effectiveFps;
-    const v1 = Number(r.fly1_speed_pxsec ?? r.fly1_speed ?? 0);
-    const v2 = Number(r.fly2_speed_pxsec ?? r.fly2_speed ?? 0);
-    const dist = Number(r.proximity_distance ?? 0);
+    const v1 = prismVelocity(r, 'fly1');
+    const v2 = prismVelocity(r, 'fly2');
+    const dist = prismDistance(r);
     lines.push([t, v1, v2, dist].map(csvEscape).join(','));
   });
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
@@ -649,17 +650,18 @@ function App() {
       }
     } catch { /* events optional until first track */ }
 
-    if (!runId) {
-      try {
-        const verRes = await fetch(`/api/verification?t=${cacheBust}`, { cache: 'no-store' });
-        if (verRes.ok) {
-          const verData = await verRes.json();
-          (verData.reviews || []).forEach((r) => {
-            reviews[r.event_id] = r;
-          });
-        }
-      } catch { /* keep empty reviews */ }
-    }
+    try {
+      const verificationUrl = runId
+        ? `/api/verification?runId=${encodeURIComponent(runId)}&t=${cacheBust}`
+        : `/api/verification?t=${cacheBust}`;
+      const verRes = await fetch(verificationUrl, { cache: 'no-store' });
+      if (verRes.ok) {
+        const verData = await verRes.json();
+        (verData.reviews || []).forEach((r) => {
+          reviews[r.event_id] = r;
+        });
+      }
+    } catch { /* keep empty reviews */ }
 
     if (generation !== loadGenerationRef.current) return { fps: 30 };
 
@@ -668,9 +670,7 @@ function App() {
     setEvents(eventList);
     setReviewsByEventId(reviews);
     setStats((prev) => {
-      const { detected, verified } = runId
-        ? { detected: eventList.filter((e) => e.type === 'courtship_bout').length, verified: 0 }
-        : computeCourtshipStats(eventList, reviews);
+      const { detected, verified } = computeCourtshipStats(eventList, reviews);
       return { ...prev, courtshipDetected: detected, courtshipVerified: verified };
     });
     return { fps, frames };
@@ -721,9 +721,11 @@ function App() {
         const hmData = [];
 
         parsedData.forEach((row, i) => {
-          // Average proximity only over frames where flies are separate (exclude merged/occluded where proximity=0 by design)
-          if (row.proximity_distance != null && !row.occlusion_flag) {
-            totalProx += row.proximity_distance;
+          // Only measured two-fly observations contribute. Dropouts retain
+          // display coordinates but carry no scientifically valid proximity.
+          const observedProximity = proximityValue(row);
+          if (observedProximity !== null) {
+            totalProx += observedProximity;
             proxCount++;
           }
           if (row.activity_level > maxAct) maxAct = row.activity_level;
@@ -791,11 +793,12 @@ function App() {
   // Load a past run's snapshot (data.csv + events.json from public/history/<runId>/)
   // into the active dashboard. Video for past runs is not snapshotted — clear it
   // so the player doesn't show a stale frame.
-  const loadHistoricRun = async (runId) => {
+  const loadHistoricRun = async (run) => {
+    const runId = run.runId;
     const generation = ++loadGenerationRef.current;
     const cacheBust = Date.now();
     setMediaCacheBust(cacheBust);
-    setRunTimestamp(new Date().toISOString());
+    setRunTimestamp(run.timestamp || null);
     setIsHistoricRun(true);
     try {
       // Load events first to get accurate fps (avoids stale state) for sleep + pxsec normalization
@@ -1034,7 +1037,7 @@ function App() {
                      history.map((run) => (
                        <div
                          key={run.runId}
-                         onClick={() => loadHistoricRun(run.runId)}
+                         onClick={() => loadHistoricRun(run)}
                          className="grid grid-cols-5 p-4 border-b border-zinc-200 dark:border-zinc-800 text-sm items-center hover:bg-zinc-50 dark:hover:bg-zinc-900/50 cursor-pointer transition-colors group last:border-b-0">
                           <div className="font-mono text-xs font-semibold text-zinc-900 dark:text-white">{run.runId}</div>
                           <div className="text-zinc-500 dark:text-zinc-400 text-xs">{formatRunDate(run.timestamp)}</div>

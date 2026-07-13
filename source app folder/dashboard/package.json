@@ -9,6 +9,10 @@
     "dev:server": "node server.js",
     "build": "vite build",
     "lint": "eslint .",
+    "lint:backend": "eslint server.js server-utils.js tests",
+    "test": "npm run test:server",
+    "test:server": "node --test tests/*.test.js",
+    "check": "npm run lint:backend && npm run test:server && npm run build",
     "preview": "vite preview"
   },
   "dependencies": {
