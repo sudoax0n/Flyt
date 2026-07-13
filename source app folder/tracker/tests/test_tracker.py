@@ -9,6 +9,17 @@ assert spec.loader is not None
 spec.loader.exec_module(tracker)
 
 
+def row(frame, proximity, confidence=1.0, occlusion=0, area=100.0):
+    return {
+        "frame": frame,
+        "proximity_distance": proximity,
+        "identity_confidence": confidence,
+        "occlusion_flag": occlusion,
+        "fly1_area": area,
+        "fly2_area": area,
+    }
+
+
 class TrackerTests(unittest.TestCase):
     def test_zero_is_not_missing(self):
         self.assertEqual(tracker.value_or({"value": 0}, "value", 999), 0)
@@ -16,25 +27,40 @@ class TrackerTests(unittest.TestCase):
 
     def test_initial_detection_has_zero_velocity(self):
         self.assertEqual(tracker.displacement((0, 0), (100, 100), False), 0.0)
-        self.assertGreater(tracker.displacement((0, 0), (3, 4), True), 0.0)
+        self.assertEqual(tracker.displacement((0, 0), (3, 4), True), 5.0)
 
-    def test_zero_proximity_generates_courtship(self):
-        rows = [
-            {"frame": i, "proximity_distance": 0, "identity_confidence": 1, "occlusion_flag": 1}
-            for i in range(5)
-        ]
+    def test_separate_confident_close_flies_generate_courtship(self):
+        rows = [row(i, proximity=20, confidence=0.8) for i in range(5)]
         events = tracker.detect_events(rows, 30, proximity_threshold=60, bout_min_frames=5)
-        self.assertEqual(events[0]["type"], "courtship_bout")
-        self.assertEqual(events[0]["mean_proximity_px"], 0)
+        self.assertEqual([event["type"] for event in events], ["courtship_bout"])
+        self.assertEqual(events[0]["occlusion_fraction"], 0)
 
-    def test_zero_confidence_generates_low_confidence_segment(self):
-        rows = [
-            {"frame": i, "proximity_distance": 999, "identity_confidence": 0, "occlusion_flag": 0}
-            for i in range(30)
-        ]
-        events = tracker.detect_events(rows, 30, proximity_threshold=60, bout_min_frames=90)
+    def test_occluded_zero_proximity_never_generates_courtship(self):
+        rows = [row(i, proximity=0, confidence=0.0, occlusion=1) for i in range(30)]
+        events = tracker.detect_events(rows, 30, proximity_threshold=60, bout_min_frames=5)
+        self.assertNotIn("courtship_bout", [event["type"] for event in events])
+        self.assertEqual([event["type"] for event in events], ["low_confidence_segment"])
+
+    def test_low_confidence_separate_flies_do_not_generate_courtship(self):
+        rows = [row(i, proximity=10, confidence=0.1, occlusion=0) for i in range(30)]
+        events = tracker.detect_events(rows, 30, proximity_threshold=60, bout_min_frames=5)
+        self.assertNotIn("courtship_bout", [event["type"] for event in events])
         self.assertEqual(events[0]["type"], "low_confidence_segment")
-        self.assertEqual(events[0]["min_identity_confidence"], 0)
+
+    def test_missing_fly_area_does_not_generate_courtship(self):
+        rows = [row(i, proximity=10, confidence=1.0, area=0) for i in range(10)]
+        events = tracker.detect_events(rows, 30, proximity_threshold=60, bout_min_frames=5)
+        self.assertNotIn("courtship_bout", [event["type"] for event in events])
+
+    def test_assignment_confidence_can_fall_below_low_confidence_threshold(self):
+        confidence = tracker.assignment_confidence((5, 0), (-5, 0), (0, 0), (0, 0))
+        self.assertLess(confidence, tracker.LOW_CONFIDENCE_THRESHOLD)
+
+    def test_frame_sync_requires_expected_input_count_when_available(self):
+        self.assertTrue(tracker.frame_sync_ok(10, 10, 9, 10))
+        self.assertFalse(tracker.frame_sync_ok(8, 8, 7, 10))
+        self.assertTrue(tracker.frame_sync_ok(8, 8, 7, 0))
+        self.assertFalse(tracker.frame_sync_ok(8, 7, 6, 8))
 
     def test_roi_validation(self):
         self.assertEqual(tracker.parse_roi("1,2,3,4"), (1, 2, 3, 4))
