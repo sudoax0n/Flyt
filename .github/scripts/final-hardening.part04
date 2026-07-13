@@ -1,3 +1,5 @@
+        run: npm ci
+
       - name: Lint backend and regression tests
         working-directory: source app folder/dashboard
         run: npm run lint:backend
