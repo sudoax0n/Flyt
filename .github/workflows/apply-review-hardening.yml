@@ -32,61 +32,59 @@ jobs:
           cache: pip
           cache-dependency-path: source app folder/tracker/requirements.txt
 
-      - name: Apply exact review patches
+      - name: Apply exact review patch
         run: python .github/scripts/apply-review-hardening.py
 
-      - name: Install dashboard dependencies
-        working-directory: source app folder/dashboard
-        run: npm ci
-
-      - name: Lint backend and tests
-        working-directory: source app folder/dashboard
+      - name: Validate and capture exact diagnostics
         run: |
           set +e
-          npm run lint:backend -- --format json > ../../.github/eslint-diagnostics.json
-          status=$?
-          cat ../../.github/eslint-diagnostics.json
-          if [ "$status" -ne 0 ]; then
+          diagnostics='.github/validation-diagnostics.txt'
+          : > "$diagnostics"
+          overall=0
+
+          run_check() {
+            label="$1"
+            shift
+            echo "===== $label =====" | tee -a "$diagnostics"
+            "$@" >> "$diagnostics" 2>&1
+            status=$?
+            cat "$diagnostics"
+            if [ "$status" -ne 0 ]; then
+              overall="$status"
+            fi
+            echo >> "$diagnostics"
+          }
+
+          run_check 'npm ci' bash -lc "cd 'source app folder/dashboard' && npm ci"
+          run_check 'backend lint' bash -lc "cd 'source app folder/dashboard' && npm run lint:backend"
+          run_check 'Node HTTP and utility tests' bash -lc "cd 'source app folder/dashboard' && npm run test:server"
+          run_check 'dashboard build' bash -lc "cd 'source app folder/dashboard' && npm run build"
+          run_check 'tracker dependency install' python -m pip install -r 'source app folder/tracker/requirements.txt'
+          run_check 'tracker syntax' python -m py_compile 'source app folder/tracker/tracker.py'
+          run_check 'tracker regression tests' python -m unittest discover -s 'source app folder/tracker/tests' -p 'test_*.py' -v
+
+          if [ "$overall" -ne 0 ]; then
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add ../../.github/eslint-diagnostics.json
-            git commit -m 'chore: capture eslint diagnostics'
+            git add "$diagnostics"
+            git commit -m 'chore: capture review validation diagnostics'
             git push origin HEAD:fix/critical-job-races
-            exit "$status"
+            exit "$overall"
           fi
-          rm ../../.github/eslint-diagnostics.json
 
-      - name: Run HTTP and utility regression tests
-        working-directory: source app folder/dashboard
-        run: npm run test:server
+          rm -f "$diagnostics" '.github/eslint-diagnostics.json'
 
-      - name: Build dashboard
-        working-directory: source app folder/dashboard
-        run: npm run build
-
-      - name: Install tracker dependencies
-        run: python -m pip install -r 'source app folder/tracker/requirements.txt'
-
-      - name: Check tracker syntax
-        run: python -m py_compile 'source app folder/tracker/tracker.py'
-
-      - name: Run tracker regression tests
-        run: python -m unittest discover -s 'source app folder/tracker/tests' -p 'test_*.py' -v
-
-      - name: Commit validated review fixes
+      - name: Commit validated UI integration
         run: |
-          if git diff --quiet -- \
-            'source app folder/dashboard/server.js' \
-            'source app folder/dashboard/src/App.jsx' \
-            '.github/eslint-diagnostics.json'; then
-            echo 'Expected validated review patches were not produced.' >&2
+          if git diff --quiet -- 'source app folder/dashboard/src/App.jsx'; then
+            echo 'Expected App.jsx review patch was not produced.' >&2
             exit 1
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A \
-            'source app folder/dashboard/server.js' \
             'source app folder/dashboard/src/App.jsx' \
+            '.github/validation-diagnostics.txt' \
             '.github/eslint-diagnostics.json'
-          git commit -m 'fix: complete review hardening integration'
+          git commit -m 'fix: preserve historic verified review counts'
           git push origin HEAD:fix/critical-job-races
