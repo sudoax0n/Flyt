@@ -10,6 +10,7 @@ import {
   publishBundle,
   recoverPublishArtifacts,
   resolveVerificationPath,
+  runCommand,
   scopeEventsForHistory,
   snapshotRunToHistory,
   terminateChild,
@@ -173,4 +174,26 @@ test('termination escalates to SIGKILL and resolves only after close', async () 
   assert.equal(settled, false);
   await termination;
   assert.deepEqual(child.signals, ['SIGTERM', 'SIGKILL']);
+});
+
+test('abort kills a real child process that ignores SIGTERM', async () => {
+  const controller = new AbortController();
+  const children = new Set();
+  const command = runCommand(process.execPath, [
+    '-e',
+    "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);",
+  ], {
+    signal: controller.signal,
+    children,
+    killOptions: { graceMs: 20, hardKillMs: 500 },
+  });
+
+  const deadline = Date.now() + 1000;
+  while (children.size === 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(children.size, 1);
+  controller.abort();
+  await assert.rejects(command, (error) => error?.name === 'AbortError');
+  assert.equal(children.size, 0);
 });
