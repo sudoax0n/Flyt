@@ -1,0 +1,280 @@
+export function scopeEventsForHistory(eventsPath, runId, destinationPath) {
+  return scopeEventsForRun(eventsPath, runId, destinationPath);
+}
+
+export function prepareRunHistoryBundle({
+  runId,
+  historyDir,
+  historyMetaPath,
+  historyIndexOutput,
+  filename,
+  durationSec,
+  fps,
+  totalFrames,
+  csvSrc,
+  eventsSrc,
+  verificationSrc,
+}) {
+  const safeRunId = requireRunId(runId);
+  for (const source of [csvSrc, eventsSrc, verificationSrc]) {
+    if (!fs.existsSync(source)) throw new Error(`Missing history source: ${source}`);
+  }
+  const history = readJson(historyMetaPath, { version: 1, runs: [] });
+  if (!Array.isArray(history.runs)) history.runs = [];
+  if (history.runs.some((run) => run.runId === safeRunId)) {
+    throw new Error(`History run already exists: ${safeRunId}`);
+  }
+  const meta = {
+    runId: safeRunId,
+    timestamp: new Date().toISOString(),
+    filename: filename || 'unknown',
+    durationSec: Math.round((durationSec || 0) * 10) / 10,
+    fps: fps || null,
+    totalFrames: totalFrames || null,
+    avgProximity: readCsvAvgProximity(csvSrc),
+    detectedBouts: countCourtshipBouts(eventsSrc),
+  };
+  history.runs.unshift(meta);
+  writeJson(historyIndexOutput, history);
+
+  const runDir = path.join(historyDir, safeRunId);
+  return {
+    meta,
+    entries: [
+      { source: csvSrc, destination: path.join(runDir, 'data.csv') },
+      { source: eventsSrc, destination: path.join(runDir, 'events.json') },
+      { source: verificationSrc, destination: path.join(runDir, 'verification.json') },
+      { source: historyIndexOutput, destination: historyMetaPath },
+    ],
+  };
+}
+
+export function verificationPathForRun(runId, historyDir, { mustExist = true } = {}) {
+  const safeRunId = requireRunId(runId);
+  const root = path.resolve(historyDir);
+  const filePath = path.resolve(root, safeRunId, 'verification.json');
+  if (!filePath.startsWith(`${root}${path.sep}`)) throw new Error('Verification path escaped history root');
+  if (mustExist && !fs.existsSync(filePath)) throw new Error('Run verification file not found');
+  return filePath;
+}
+
+export function resolveVerificationPath(eventId, historyDir) {
+  const separator = String(eventId).indexOf(':');
+  if (separator <= 0 || separator === String(eventId).length - 1) {
+    throw new Error('Run-scoped event ID required');
+  }
+  return verificationPathForRun(String(eventId).slice(0, separator), historyDir);
+}'''
+
+utils = replace_between(
+    utils,
+    'export function readCsvAvgProximity',
+    # replace through EOF; marker is the old final resolver
+    'export function resolveVerificationPath',
+    history_block,
+    'server-utils history block prefix',
+)
+# replace_between preserved the old resolver because it starts at the end marker.
+old_resolver_start = utils.find('export function resolveVerificationPath', utils.find(history_block[:30]) + len(history_block))
+if old_resolver_start >= 0:
+    utils = utils[:old_resolver_start].rstrip() + '\n'
+
+utils_path.write_text(utils, encoding='utf-8')
+
+# ---------------------------------------------------------------------------
+# Server: durable run ID, atomic current+history publication, canonical reviews.
+# ---------------------------------------------------------------------------
+server_path = root / 'source app folder/dashboard/server.js'
+server = server_path.read_text(encoding='utf-8')
+server = replace_once(server, '  buildTrackerArgs,\n', '  buildTrackerArgs,\n  createRunId,\n', 'server createRunId import')
+server = replace_once(
+    server,
+    '  parseTrackerSync,\n  publishBundle,\n',
+    '  parseTrackerSync,\n  prepareRunHistoryBundle,\n  publishBundle,\n',
+    'server prepare history import',
+)
+server = replace_once(server, '  resolveVerificationPath,\n', '  resolveVerificationPath,\n  scopeEventsForRun,\n', 'server scope import')
+server = replace_once(server, '  snapshotRunToHistory,\n', '  verificationPathForRun,\n', 'server verification import')
+server = replace_once(server, '  let runSequence = 0;\n', '', 'server run sequence removal')
+server = replace_once(
+    server,
+    "    publish: options.services?.publish || ((entries, token) => publishBundle(entries, token)),\n    snapshot: options.services?.snapshot || snapshotRunToHistory,\n",
+    "    publish: options.services?.publish || ((entries, token) => publishBundle(\n      entries, token, { manifestDir: publicDir },\n    )),\n    prepareHistory: options.services?.prepareHistory || prepareRunHistoryBundle,\n",
+    'server services',
+)
+server = replace_once(
+    server,
+    '  function readVerification(filePath = verificationPath) {\n',
+    '  function readVerification(filePath) {\n',
+    'server read verification signature',
+)
+server = replace_once(
+    server,
+    "  function createRunContext(inputPath, filename, overrides) {\n    const runId = ++runSequence;\n",
+    "  function createRunContext(inputPath, filename, overrides) {\n    const runId = createRunId();\n",
+    'server durable run id',
+)
+server = replace_once(
+    server,
+    "      verification: path.join(context.workDir, 'verification.json'),\n",
+    "      verification: path.join(context.workDir, 'verification.json'),\n      historyIndex: path.join(context.workDir, 'history.json'),\n",
+    'server history output',
+)
+server = replace_once(
+    server,
+    "      const fps = readEventsFps(outputs.events);\n      const metadata = {\n        ...integrity,\n        expectedVideoFrames: syncInfo.expectedVideoFrames,\n        fps,\n        timestamp: new Date().toISOString(),\n      };\n      writeJson(outputs.metadata, metadata);\n      writeJson(outputs.verification, { version: 1, reviews: [] });\n      ensureCurrent();\n\n      job.progress = 'Publishing validated results...';\n      services.publish([\n        { source: outputs.csv, destination: path.join(publicDir, 'data.csv') },\n        { source: outputs.events, destination: path.join(publicDir, 'events.json') },\n        { source: outputs.browserVideo, destination: path.join(publicDir, 'tracked.mp4') },\n        { source: outputs.metadata, destination: path.join(publicDir, 'run_metadata.json') },\n        { source: outputs.verification, destination: verificationPath },\n      ], context.token);\n      ensureCurrent();\n\n      try {\n        services.snapshot({\n          historyDir,\n          historyMetaPath,\n          filename: context.filename,\n          durationSec: (Date.now() - context.startedAt) / 1000,\n          fps,\n          totalFrames: integrity.inputFrames,\n          csvSrc: outputs.csv,\n          eventsSrc: outputs.events,\n        });\n      } catch (historyError) {\n        console.error(`[Server] History snapshot failed: ${historyError.message}`);\n      }\n",
+    "      const fps = readEventsFps(outputs.events);\n      scopeEventsForRun(outputs.events, context.runId, outputs.events);\n      const metadata = {\n        ...integrity,\n        runId: context.runId,\n        expectedVideoFrames: syncInfo.expectedVideoFrames,\n        fps,\n        timestamp: new Date().toISOString(),\n      };\n      writeJson(outputs.metadata, metadata);\n      writeJson(outputs.verification, { version: 1, run_id: context.runId, reviews: [] });\n      const historyBundle = services.prepareHistory({\n        runId: context.runId,\n        historyDir,\n        historyMetaPath,\n        historyIndexOutput: outputs.historyIndex,\n        filename: context.filename,\n        durationSec: (Date.now() - context.startedAt) / 1000,\n        fps,\n        totalFrames: integrity.inputFrames,\n        csvSrc: outputs.csv,\n        eventsSrc: outputs.events,\n        verificationSrc: outputs.verification,\n      });\n      ensureCurrent();\n\n      job.progress = 'Publishing validated current and historical results...';\n      services.publish([\n        { source: outputs.csv, destination: path.join(publicDir, 'data.csv') },\n        { source: outputs.events, destination: path.join(publicDir, 'events.json') },\n        { source: outputs.browserVideo, destination: path.join(publicDir, 'tracked.mp4') },\n        { source: outputs.metadata, destination: path.join(publicDir, 'run_metadata.json') },\n        ...historyBundle.entries,\n      ], context.token);\n      ensureCurrent();\n",
+    'server atomic history publication',
+)
+
+old_routes = r'''  app.get('/api/verification', (req, res) => {
+    if (!req.query.runId) return res.json(readVerification());
+    const history = readJson(historyMetaPath, { runs: [] });
+    const known = history.runs?.some((run) => run.runId === req.query.runId);
+    if (!known) return res.status(404).json({ error: 'Run not found' });
+    return res.json(readVerification(path.join(historyDir, req.query.runId, 'verification.json')));
+  });
+
+  app.post('/api/verification', (req, res) => {
+    const { eventId, verdict } = req.body || {};
+    if (!eventId || !['confirmed', 'rejected'].includes(verdict)) {
+      return res.status(400).json({ error: 'Body must include eventId and verdict.' });
+    }
+    try {
+      const filePath = resolveVerificationPath(
+        eventId,
+        verificationPath,
+        historyDir,
+        historyMetaPath,
+      );
+      const data = readVerification(filePath);
+      const review = { event_id: eventId, verdict, reviewed_at: new Date().toISOString() };
+      const index = data.reviews.findIndex((item) => item.event_id === eventId);
+      if (index >= 0) data.reviews[index] = review;
+      else data.reviews.push(review);
+      writeJson(filePath, data);
+      return res.json({ success: true, review });
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/verification/reset', (_req, res) => {
+    writeJson(verificationPath, { version: 1, reviews: [] });
+    res.json({ success: true });
+  });'''
+
+new_routes = r'''  function currentRunId() {
+    return readJson(path.join(publicDir, 'run_metadata.json'), null)?.runId || null;
+  }
+
+  app.get('/api/verification', (req, res) => {
+    const runId = req.query.runId || currentRunId();
+    if (!runId) return res.status(404).json({ error: 'No current run found' });
+    try {
+      return res.json(readVerification(verificationPathForRun(runId, historyDir)));
+    } catch (error) {
+      return res.status(404).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/verification', (req, res) => {
+    const { eventId, verdict } = req.body || {};
+    if (!eventId || !['confirmed', 'rejected'].includes(verdict)) {
+      return res.status(400).json({ error: 'Body must include eventId and verdict.' });
+    }
+    try {
+      const filePath = resolveVerificationPath(eventId, historyDir);
+      const data = readVerification(filePath);
+      const review = { event_id: eventId, verdict, reviewed_at: new Date().toISOString() };
+      const index = data.reviews.findIndex((item) => item.event_id === eventId);
+      if (index >= 0) data.reviews[index] = review;
+      else data.reviews.push(review);
+      writeJson(filePath, data);
+      return res.json({ success: true, review });
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/verification/reset', (req, res) => {
+    const runId = req.body?.runId || currentRunId();
+    if (!runId) return res.status(404).json({ error: 'No current run found' });
+    try {
+      writeJson(verificationPathForRun(runId, historyDir), { version: 1, run_id: runId, reviews: [] });
+      return res.json({ success: true });
+    } catch (error) {
+      return res.status(404).json({ error: error.message });
+    }
+  });'''
+server = replace_once(server, old_routes, new_routes, 'server canonical verification routes')
+server_path.write_text(server, encoding='utf-8')
+
+# ---------------------------------------------------------------------------
+# Tracker: missing observations are explicit and OpenCV count is diagnostic.
+# ---------------------------------------------------------------------------
+tracker_path = root / 'source app folder/tracker/tracker.py'
+tracker = tracker_path.read_text(encoding='utf-8')
+tracker = replace_once(
+    tracker,
+    '    proximities = [value_or(row, "proximity_distance", 0.0) for row in segment]\n',
+    '    proximities = [\n        value_or(row, "proximity_distance", math.nan) for row in segment\n        if math.isfinite(value_or(row, "proximity_distance", math.nan))\n    ]\n',
+    'tracker finite event proximities',
+)
+tracker = replace_once(
+    tracker,
+    '    fly2_present = value_or(row, "fly2_area", 0.0) > 0.0\n    return (\n        math.isfinite(proximity)\n',
+    '    fly2_present = value_or(row, "fly2_area", 0.0) > 0.0\n    tracking_valid = value_or(row, "tracking_valid", 1.0) != 0.0\n    return (\n        tracking_valid\n        and math.isfinite(proximity)\n',
+    'tracker courtship tracking validity',
+)
+tracker = replace_once(
+    tracker,
+    'def is_low_confidence_frame(row: dict[str, Any]) -> bool:\n    return (\n        value_or(row, "occlusion_flag", 0.0) != 0.0\n',
+    'def is_low_confidence_frame(row: dict[str, Any]) -> bool:\n    return (\n        value_or(row, "tracking_valid", 1.0) == 0.0\n        or value_or(row, "occlusion_flag", 0.0) != 0.0\n',
+    'tracker low confidence tracking validity',
+)
+tracker = replace_once(
+    tracker,
+    '''    expected_sync_ok = (
+        expected_frame_count <= 0 or frames_processed == expected_frame_count
+    )
+    return internal_sync_ok and expected_sync_ok
+''',
+    '''    # OpenCV CAP_PROP_FRAME_COUNT is diagnostic only. The server performs the
+    # authoritative full decode with ffmpeg and compares it to tracker/CSV/video output.
+    _ = expected_frame_count
+    return internal_sync_ok
+''',
+    'tracker diagnostic OpenCV frame count',
+)
+tracker = replace_once(
+    tracker,
+    '    expected_frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))\n',
+    '    expected_frame_count = max(0, int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))\n',
+    'tracker nonnegative expected count',
+)
+tracker = replace_once(
+    tracker,
+    '''            proximity = 0.0
+            occlusion_flag = 0
+            identity_confidence = 0.0
+            fly1_area = fly2_area = 0.0
+''',
+    '''            proximity = math.nan
+            occlusion_flag = 0
+            identity_confidence = 0.0
+            fly1_area = fly2_area = 0.0
+            detection_count = len(centroids)
+            tracking_valid = 0
+''',
+    'tracker invalid observation defaults',
+)
+tracker = replace_once(
+    tracker,
+    '                proximity = float(math.dist(f1_coords, f2_coords))\n                prev_f1, prev_f2 = f1_coords, f2_coords\n',
+    '                proximity = float(math.dist(f1_coords, f2_coords))\n                tracking_valid = 1\n                prev_f1, prev_f2 = f1_coords, f2_coords\n',
+    'tracker valid observation',
+)
+tracker = replace_once(
+    tracker,
+    '''            elif is_initialized:
