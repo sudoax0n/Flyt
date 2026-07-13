@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/tmp/apply-final-hardening.py", line 664, in <module>
+    utils_test = replace_once(
+                 ^^^^^^^^^^^^^
+  File "/tmp/apply-final-hardening.py", line 7, in replace_once
+    raise RuntimeError(f"{label}: expected one occurrence, found {count}")
+RuntimeError: utils test imports: expected one occurrence, found 0
