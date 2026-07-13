@@ -92,7 +92,7 @@ function rollbackPublishManifest(manifest) {
     }
   });
   if (errors.length) {
-    throw new AggregateError(errors, 'Publication transaction rollback failed');
+    throw new globalThis.AggregateError(errors, 'Publication transaction rollback failed');
   }
 }
 
@@ -166,7 +166,7 @@ export function publishBundle(entries, token, { faultInjector, manifestDir } = {
       rollbackPublishManifest(manifest);
       safeUnlink(manifestPath);
     } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Publication failed and rollback was incomplete');
+      throw new globalThis.AggregateError([error, rollbackError], 'Publication failed and rollback was incomplete');
     }
     throw error;
   }
