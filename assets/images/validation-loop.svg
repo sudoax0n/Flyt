@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">Human-in-the-loop validation workflow</title>
+  <desc id="desc">Detected behavioral events are linked to video, reviewed by a researcher, and converted into validated metrics.</desc>
+  <defs>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#151B2D"/><stop offset="1" stop-color="#0A0D16"/></linearGradient>
+    <linearGradient id="violet" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#B79BFF"/><stop offset="1" stop-color="#6E48FF"/></linearGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#79E8FF"/><stop offset="1" stop-color="#329BFF"/></linearGradient>
+  </defs>
+  <rect width="1200" height="420" rx="28" fill="#080B13"/>
+  <text x="48" y="54" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="26" font-weight="750">Human verification is part of the measurement pipeline</text>
+  <text x="48" y="83" fill="#8F9AB1" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15">Flyt surfaces candidates; the researcher controls what becomes accepted evidence.</text>
+  <g transform="translate(48 112)">
+    <rect width="300" height="258" rx="22" fill="url(#panel)" stroke="#4D5870" stroke-opacity=".55"/>
+    <text x="24" y="34" fill="#B7C0D5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="700">DETECTED EVENTS</text>
+    <g transform="translate(18 54)">
+      <rect width="264" height="52" rx="14" fill="#1A1730" stroke="#8268FF" stroke-opacity=".5"/>
+      <circle cx="25" cy="26" r="8" fill="#9073FF"/>
+      <text x="43" y="23" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="700">Courtship bout</text>
+      <text x="43" y="40" fill="#9EA8BC" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11">02:14–02:21 · confidence 0.91</text>
+    </g>
+    <g transform="translate(18 116)">
+      <rect width="264" height="52" rx="14" fill="#101626"/>
+      <circle cx="25" cy="26" r="8" fill="#52D9FF"/>
+      <text x="43" y="23" fill="#E8ECF6" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="700">Close proximity</text>
+      <text x="43" y="40" fill="#8994AA" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11">03:08–03:12 · confidence 0.78</text>
+    </g>
+    <g transform="translate(18 178)">
+      <rect width="264" height="52" rx="14" fill="#101626"/>
+      <circle cx="25" cy="26" r="8" fill="#F2C86A"/>
+      <text x="43" y="23" fill="#E8ECF6" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="700">Low-confidence segment</text>
+      <text x="43" y="40" fill="#8994AA" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11">04:33–04:36 · inspect identity</text>
+    </g>
+  </g>
+  <path d="M366 241H405" stroke="#657089" stroke-width="4" stroke-linecap="round"/>
+  <path d="M396 233L408 241L396 249" fill="none" stroke="#7C88A3" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <g transform="translate(424 112)">
+    <rect width="366" height="258" rx="22" fill="url(#panel)" stroke="#4D5870" stroke-opacity=".55"/>
+    <rect x="22" y="22" width="322" height="170" rx="16" fill="#0B101C" stroke="#626D84" stroke-opacity=".45"/>
+    <path d="M49 160C92 121 118 146 151 97C176 61 220 126 250 78C271 46 301 73 324 48" fill="none" stroke="#8F72FF" stroke-width="4" stroke-linecap="round"/>
+    <path d="M54 64C96 75 107 118 149 133C207 153 245 166 321 159" fill="none" stroke="#50D8FF" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="151" cy="97" r="9" fill="#9D7EFF"/><circle cx="149" cy="133" r="9" fill="#57DBFF"/>
+    <rect x="22" y="205" width="322" height="7" rx="4" fill="#283044"/><rect x="22" y="205" width="190" height="7" rx="4" fill="url(#violet)"/>
+    <circle cx="212" cy="208.5" r="8" fill="#FFFFFF"/>
+    <rect x="22" y="226" width="146" height="20" rx="10" fill="#182032"/>
+    <text x="34" y="240" fill="#AAB4C8" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="10">seek linked to event timestamp</text>
+    <circle cx="316" cy="235" r="11" fill="#283044"/><path d="M312 229L322 235L312 241Z" fill="#FFFFFF"/>
+  </g>
+  <path d="M808 241H847" stroke="#657089" stroke-width="4" stroke-linecap="round"/>
+  <path d="M838 233L850 241L838 249" fill="none" stroke="#7C88A3" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <g transform="translate(866 112)">
+    <rect width="286" height="258" rx="22" fill="url(#panel)" stroke="#4D5870" stroke-opacity=".55"/>
+    <text x="22" y="34" fill="#B7C0D5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="700">RESEARCHER VERDICT</text>
+    <rect x="22" y="54" width="116" height="44" rx="22" fill="#17402E"/>
+    <path d="M39 76L47 84L61 67" fill="none" stroke="#6EE7B7" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="70" y="81" fill="#DFFFF0" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="700">CONFIRM</text>
+    <rect x="148" y="54" width="116" height="44" rx="22" fill="#3C1D29"/>
+    <path d="M166 68L182 84M182 68L166 84" stroke="#FF8190" stroke-width="4" stroke-linecap="round"/>
+    <text x="193" y="81" fill="#FFE9EC" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="700">REJECT</text>
+    <rect x="22" y="118" width="242" height="112" rx="16" fill="#0F1524"/>
+    <text x="42" y="145" fill="#8F9AB1" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11">VALIDATED OUTPUT</text>
+    <text x="42" y="181" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="28" font-weight="750">12 bouts</text>
+    <text x="42" y="207" fill="#6EE7B7" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="650">ready for CSV / Prism / PDF</text>
+  </g>
+</svg>
