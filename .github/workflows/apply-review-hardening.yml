@@ -1,0 +1,73 @@
+name: Apply review hardening
+
+on:
+  push:
+    branches:
+      - fix/critical-job-races
+    paths:
+      - '.github/scripts/apply-review-hardening.py'
+      - '.github/workflows/apply-review-hardening.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/critical-job-races
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: source app folder/dashboard/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: source app folder/tracker/requirements.txt
+
+      - name: Apply exact frontend patch
+        run: python .github/scripts/apply-review-hardening.py
+
+      - name: Install dashboard dependencies
+        working-directory: source app folder/dashboard
+        run: npm ci
+
+      - name: Lint backend and tests
+        working-directory: source app folder/dashboard
+        run: npm run lint:backend
+
+      - name: Run HTTP and utility regression tests
+        working-directory: source app folder/dashboard
+        run: npm run test:server
+
+      - name: Build dashboard
+        working-directory: source app folder/dashboard
+        run: npm run build
+
+      - name: Install tracker dependencies
+        run: python -m pip install -r 'source app folder/tracker/requirements.txt'
+
+      - name: Check tracker syntax
+        run: python -m py_compile 'source app folder/tracker/tracker.py'
+
+      - name: Run tracker regression tests
+        run: python -m unittest discover -s 'source app folder/tracker/tests' -p 'test_*.py' -v
+
+      - name: Commit validated frontend integration
+        run: |
+          if git diff --quiet -- 'source app folder/dashboard/src/App.jsx'; then
+            echo 'Expected App.jsx patch was not produced.' >&2
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 'source app folder/dashboard/src/App.jsx'
+          git commit -m 'fix: complete historic verification integration'
+          git push origin HEAD:fix/critical-job-races
