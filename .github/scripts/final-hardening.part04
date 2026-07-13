@@ -1,0 +1,14 @@
+      - name: Lint backend and regression tests
+        working-directory: source app folder/dashboard
+        run: npm run lint:backend
+
+      - name: Run Node utility, HTTP, lifecycle, and metric tests
+        working-directory: source app folder/dashboard
+        run: npm run test:server
+
+      - name: Build dashboard
+        working-directory: source app folder/dashboard
+        run: npm run build
+''', encoding='utf-8')
+
+print('Applied final crash-recovery, run-scoped verification, and metric-integrity hardening.')
