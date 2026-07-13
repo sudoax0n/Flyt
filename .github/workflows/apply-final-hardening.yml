@@ -97,13 +97,15 @@ jobs:
 
       - name: Commit validated final hardening
         run: |
-          if git diff --quiet; then
+          set -o pipefail
+          exec > >(tee /tmp/final-hardening-commit.txt) 2>&1
+          if [ -z "$(git status --porcelain)" ]; then
             echo 'Final hardening already applied; no commit needed.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add \
+          git add -A -- \
             '.github/workflows/critical-fixes-ci.yml' \
             'source app folder/dashboard/server-utils.js' \
             'source app folder/dashboard/server.js' \
@@ -116,5 +118,16 @@ jobs:
             'source app folder/tracker/tracker.py' \
             'source app folder/tracker/tests/test_tracker.py' \
             '.github/final-hardening-diagnostics.txt'
+          git status --short
           git commit -m 'fix: make publication and reviews transactionally durable'
+          git fetch origin fix/critical-job-races
+          git rebase origin/fix/critical-job-races
           git push origin HEAD:fix/critical-job-races
+
+      - name: Upload commit diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-hardening-commit-diagnostics
+          path: /tmp/final-hardening-commit.txt
+          if-no-files-found: ignore
