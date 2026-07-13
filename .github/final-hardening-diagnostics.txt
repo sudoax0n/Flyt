@@ -1,7 +1,11 @@
-Traceback (most recent call last):
-  File "/tmp/apply-final-hardening.py", line 664, in <module>
-    utils_test = replace_once(
-                 ^^^^^^^^^^^^^
-  File "/tmp/apply-final-hardening.py", line 7, in replace_once
-    raise RuntimeError(f"{label}: expected one occurrence, found {count}")
-RuntimeError: utils test imports: expected one occurrence, found 0
+
+> dashboard@0.0.0 lint:backend
+> eslint server.js server-utils.js tests
+
+
+/home/runner/work/Flyt/Flyt/source app folder/dashboard/server-utils.js
+  301:15  error  'AggregateError' is not defined  no-undef
+  375:17  error  'AggregateError' is not defined  no-undef
+
+✖ 2 problems (2 errors, 0 warnings)
+
