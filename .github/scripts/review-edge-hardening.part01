@@ -1,0 +1,328 @@
+          throw new Error(`Cannot restore missing prior destination: ${entry.destination}`);
+        }
+      } else {
+        removeFile(entry.destination);
+        removeFile(entry.backup);
+      }
+      removeFile(entry.stage);
+    } catch (error) {
+      errors.push(error);
+    }
+  });
+  if (errors.length) {
+    throw new globalThis.AggregateError(errors, 'Publication transaction rollback failed');
+  }
+}
+
+function finalizeCommittedManifest(manifest, { removeFile = removeTransactionalFile } = {}) {
+  const missing = manifest.entries.filter((entry) => !fs.existsSync(entry.destination));
+  if (missing.length) {
+    rollbackPublishManifest(manifest, { removeFile });
+    return;
+  }
+  manifest.entries.forEach((entry) => {
+    removeFile(entry.stage);
+    removeFile(entry.backup);
+  });
+}
+''',
+    'strict transaction cleanup',
+)
+
+utils = replace_once(
+    utils,
+    '''export function publishBundle(entries, token, { faultInjector, manifestDir } = {}) {''',
+    '''export function publishBundle(entries, token, {
+  faultInjector,
+  manifestDir,
+  removeFile = removeTransactionalFile,
+} = {}) {''',
+    'publishBundle remove injection',
+)
+
+utils = replace_once(
+    utils,
+    '''    finalizeCommittedManifest(manifest);
+    safeUnlink(manifestPath);
+  } catch (error) {
+    if (error instanceof SimulatedProcessCrash) throw error;
+    try {
+      rollbackPublishManifest(manifest);
+      safeUnlink(manifestPath);
+    } catch (rollbackError) {
+      throw new globalThis.AggregateError([error, rollbackError], 'Publication failed and rollback was incomplete');
+    }
+    throw error;
+  }
+}
+
+export function recoverPublishArtifacts(directory) {''',
+    '''    finalizeCommittedManifest(manifest, { removeFile });
+    removeFile(manifestPath);
+  } catch (error) {
+    if (error instanceof SimulatedProcessCrash) throw error;
+    if (manifest.state === 'committed') throw error;
+    try {
+      rollbackPublishManifest(manifest, { removeFile });
+      removeFile(manifestPath);
+    } catch (rollbackError) {
+      throw new globalThis.AggregateError([error, rollbackError], 'Publication failed and rollback was incomplete');
+    }
+    throw error;
+  }
+}
+
+export function recoverPublishArtifacts(directory, { removeFile = removeTransactionalFile } = {}) {''',
+    'strict publish success and rollback',
+)
+
+utils = replace_once(
+    utils,
+    '''  manifests.forEach((manifestPath) => {
+    const manifest = validatePublishManifest(readJson(manifestPath, null), manifestPath);
+    if (manifest.state === 'committed') finalizeCommittedManifest(manifest);
+    else rollbackPublishManifest(manifest);
+    safeUnlink(manifestPath);
+  });
+
+  const artifacts = listFilesRecursive(directory);
+  const orphanBackups = artifacts.filter((filePath) => filePath.endsWith('.bak'));
+  if (orphanBackups.length) {
+    throw new Error(
+      `Unrecoverable publication backups without a transaction manifest: ${orphanBackups.join(', ')}`,
+    );
+  }
+  artifacts.filter((filePath) => filePath.endsWith('.new')).forEach(safeUnlink);
+}''',
+    '''  manifests.forEach((manifestPath) => {
+    const manifest = validatePublishManifest(readJson(manifestPath, null), manifestPath);
+    if (manifest.state === 'committed') finalizeCommittedManifest(manifest, { removeFile });
+    else rollbackPublishManifest(manifest, { removeFile });
+    removeFile(manifestPath);
+  });
+
+  const artifacts = listFilesRecursive(directory);
+  const orphanBackups = artifacts.filter((filePath) => filePath.endsWith('.bak'));
+  if (orphanBackups.length) {
+    throw new Error(
+      `Unrecoverable publication backups without a transaction manifest: ${orphanBackups.join(', ')}`,
+    );
+  }
+  artifacts.filter((filePath) => filePath.endsWith('.new')).forEach((filePath) => removeFile(filePath));
+}''',
+    'strict startup transaction cleanup',
+)
+
+utils = replace_once(
+    utils,
+    '''export function verificationPathForRun(runId, historyDir, { mustExist = true } = {}) {
+  const safeRunId = requireRunId(runId);
+  const root = path.resolve(historyDir);
+  const filePath = path.resolve(root, safeRunId, 'verification.json');
+  if (!filePath.startsWith(`${root}${path.sep}`)) throw new Error('Verification path escaped history root');
+  if (mustExist && !fs.existsSync(filePath)) throw new Error('Run verification file not found');
+  return filePath;
+}
+
+export function resolveVerificationPath(eventId, historyDir) {
+  const separator = String(eventId).indexOf(':');
+  if (separator <= 0 || separator === String(eventId).length - 1) {
+    throw new Error('Run-scoped event ID required');
+  }
+  return verificationPathForRun(String(eventId).slice(0, separator), historyDir);
+}
+''',
+    '''export function runIdFromEventId(eventId) {
+  const value = String(eventId);
+  const separator = value.indexOf(':');
+  if (separator <= 0 || separator === value.length - 1) {
+    throw new Error('Run-scoped event ID required');
+  }
+  return requireRunId(value.slice(0, separator));
+}
+
+export function verificationPathForRun(runId, historyDir, { mustExist = true } = {}) {
+  const safeRunId = requireRunId(runId);
+  const root = path.resolve(historyDir);
+  const filePath = path.resolve(root, safeRunId, 'verification.json');
+  if (!filePath.startsWith(`${root}${path.sep}`)) throw new Error('Verification path escaped history root');
+  if (mustExist && !fs.existsSync(filePath)) throw new Error('Run verification file not found');
+  return filePath;
+}
+
+export function eventsPathForRun(runId, historyDir, { mustExist = true } = {}) {
+  const safeRunId = requireRunId(runId);
+  const root = path.resolve(historyDir);
+  const filePath = path.resolve(root, safeRunId, 'events.json');
+  if (!filePath.startsWith(`${root}${path.sep}`)) throw new Error('Events path escaped history root');
+  if (mustExist && !fs.existsSync(filePath)) throw new Error('Run events file not found');
+  return filePath;
+}
+
+export function assertEventBelongsToRun(eventId, historyDir) {
+  const value = String(eventId);
+  const runId = runIdFromEventId(value);
+  const events = readJson(eventsPathForRun(runId, historyDir), null);
+  if (!events || !Array.isArray(events.events)) throw new Error('Run events file is invalid');
+  if (events.run_id && events.run_id !== runId) throw new Error('Run events file has a mismatched run ID');
+  if (!events.events.some((event) => String(event.id) === value)) {
+    throw new Error('Event does not belong to the referenced run');
+  }
+  return runId;
+}
+
+export function resolveVerificationPath(eventId, historyDir) {
+  return verificationPathForRun(runIdFromEventId(eventId), historyDir);
+}
+''',
+    'validate review event membership',
+)
+
+write(utils_path, utils)
+
+# ---------------------------------------------------------------------------
+# server.js: actively abort multipart uploads, recover stale runtime workspaces,
+# validate event membership, and remain fail-closed after termination errors.
+# ---------------------------------------------------------------------------
+server_path = 'source app folder/dashboard/server.js'
+server = read(server_path)
+
+server = replace_once(
+    server,
+    '''import {
+  AbortRunError,
+  buildTrackerArgs,''',
+    '''import {
+  AbortRunError,
+  assertEventBelongsToRun,
+  buildTrackerArgs,''',
+    'server import event validation',
+)
+server = replace_once(
+    server,
+    '''  readJson,
+  recoverPublishArtifacts,
+  resolveVerificationPath,''',
+    '''  readJson,
+  recoverPublishArtifacts,
+  recoverRuntimeArtifacts,
+  resolveVerificationPath,''',
+    'server import runtime recovery',
+)
+server = replace_once(
+    server,
+    '''  for (const dir of [uploadsDir, publicDir, historyDir]) ensureDir(dir);
+  recoverPublishArtifacts(publicDir);''',
+    '''  for (const dir of [uploadsDir, publicDir, historyDir]) ensureDir(dir);
+  recoverRuntimeArtifacts(uploadsDir);
+  recoverPublishArtifacts(publicDir);''',
+    'startup runtime recovery',
+)
+server = replace_once(
+    server,
+    '''  const storage = multer.diskStorage({
+    destination: (_req, _file, callback) => callback(null, uploadsDir),
+    filename: (_req, file, callback) => {
+      callback(null, `input-${Date.now()}-${randomUUID()}${path.extname(file.originalname).toLowerCase()}`);
+    },
+  });''',
+    '''  const storage = multer.diskStorage({
+    destination: (_req, _file, callback) => callback(null, uploadsDir),
+    filename: (req, file, callback) => {
+      const filename = `input-${Date.now()}-${randomUUID()}${path.extname(file.originalname).toLowerCase()}`;
+      const state = pendingUploads.get(req);
+      if (state) state.filePath = path.join(uploadsDir, filename);
+      callback(null, filename);
+    },
+  });''',
+    'track partial upload filename',
+)
+server = replace_once(
+    server,
+    '''  let terminating = false;
+  let activeRun = null;
+  let job = blankJob();''',
+    '''  let terminating = false;
+  let activeRun = null;
+  let job = blankJob();
+  const pendingUploads = new Map();''',
+    'pending upload state',
+)
+server = replace_once(
+    server,
+    '''  function reserveUpload(req, res, next) {
+    if (isBusy()) {
+      return res.status(409).json({ error: 'A video is already uploading, processing, or stopping.' });
+    }
+    req.uploadEpoch = epoch;
+    uploadReserved = true;
+    let released = false;
+    const release = () => {
+      if (!released) {
+        released = true;
+        uploadReserved = false;
+      }
+    };
+    res.once('finish', release);
+    res.once('close', release);
+    return next();
+  }
+''',
+    '''  function reserveUpload(req, res, next) {
+    if (isBusy()) {
+      return res.status(409).json({ error: 'A video is already uploading, processing, or stopping.' });
+    }
+    req.uploadEpoch = epoch;
+    uploadReserved = true;
+    let released = false;
+    let resolveClosed;
+    const state = {
+      request: req,
+      filePath: null,
+      closed: new Promise((resolve) => { resolveClosed = resolve; }),
+      release: null,
+    };
+    const release = () => {
+      if (released) return;
+      released = true;
+      pendingUploads.delete(req);
+      uploadReserved = pendingUploads.size > 0;
+    };
+    state.release = release;
+    pendingUploads.set(req, state);
+    req.once('close', () => resolveClosed());
+    res.once('finish', release);
+    res.once('close', release);
+    return next();
+  }
+''',
+    'active multipart reservation',
+)
+server = replace_once(
+    server,
+    '''  function readVerification(filePath) {
+    const data = readJson(filePath, { version: 1, reviews: [] });
+    return Array.isArray(data.reviews) ? data : { version: 1, reviews: [] };
+  }
+
+  async function stopActiveRun() {
+    epoch += 1;
+    const context = activeRun;
+    activeRun = null;
+    job = { ...blankJob(), status: context ? 'stopping' : 'idle' };
+    if (!context) return;
+
+    terminating = true;
+    context.controller.abort();
+    try {
+      const children = [...context.children];
+      await Promise.all(children.map((child) => terminateChild(child, killOptions)));
+      await context.done.catch((error) => {
+        if (error?.name !== 'AbortError') throw error;
+      });
+      job = blankJob();
+    } catch (error) {
+      job = {
+        ...blankJob(),
+        status: 'error',
+        error: `Could not terminate active run: ${error.message}`,
