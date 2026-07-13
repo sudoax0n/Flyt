@@ -421,8 +421,10 @@ def run_tracker(args: argparse.Namespace) -> int:
             if out:
                 out.write(frame)
             frame_num += 1
-            if frame_num % 100 == 0:
-                print(f"Processed {frame_num} frames...")
+            # Flush every 30 frames so Node can stream live progress (piped
+            # stdout is block-buffered without flush / PYTHONUNBUFFERED).
+            if frame_num == 1 or frame_num % 30 == 0:
+                print(f"Processed {frame_num} frames...", flush=True)
     finally:
         cap.release()
         if out:
@@ -444,15 +446,17 @@ def run_tracker(args: argparse.Namespace) -> int:
     )
     print(
         f"TRACKER_SYNC frames_processed={frame_num} csv_rows={len(data)} "
-        f"expected_video_frames={expected_frame_count} sync_ok={str(sync_ok).lower()}"
+        f"expected_video_frames={expected_frame_count} sync_ok={str(sync_ok).lower()}",
+        flush=True,
     )
     if not sync_ok:
         print(
             "Error: frame integrity mismatch between tracker loop and CSV",
             file=sys.stderr,
+            flush=True,
         )
         return 2
-    print(f"Tracking completed! Data saved to {args.output_csv}.")
+    print(f"Tracking completed! Data saved to {args.output_csv}.", flush=True)
     return 0
 
 

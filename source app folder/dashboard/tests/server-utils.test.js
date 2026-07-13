@@ -5,8 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
+  appendStageLog,
   assertEventBelongsToRun,
   buildTrackerArgs,
+  createLineBuffer,
+  parseProcessedFramesLine,
   parseTrackerSync,
   prepareRunHistoryBundle,
   publishBundle,
@@ -17,7 +20,9 @@ import {
   runCommand,
   scopeEventsForRun,
   SimulatedProcessCrash,
+  summarizeTrackingValidityFromCsv,
   terminateChild,
+  toClientErrorMessage,
   validateFrameIntegrity,
   verificationPathForRun,
 } from '../server-utils.js';
@@ -41,6 +46,90 @@ test('requires exactly one tracker sync marker', () => {
   });
   assert.equal(parseTrackerSync('no marker'), null);
   assert.equal(parseTrackerSync(`${marker}\n${marker}`), null);
+});
+
+test('createLineBuffer reconstructs split progress lines', () => {
+  const lines = [];
+  const buffer = createLineBuffer((line) => lines.push(line));
+  buffer.push('Processed 1');
+  buffer.push('00 frames...\nProcessed 2');
+  buffer.push('00 frames...\n');
+  assert.deepEqual(lines, ['Processed 100 frames...', 'Processed 200 frames...']);
+  assert.equal(parseProcessedFramesLine(lines[0]), 100);
+  assert.equal(parseProcessedFramesLine(lines[1]), 200);
+  assert.equal(parseProcessedFramesLine('noise'), null);
+});
+
+test('parseProcessedFramesLine accepts 30-frame cadence progress lines', () => {
+  assert.equal(parseProcessedFramesLine('Processed 1 frames...'), 1);
+  assert.equal(parseProcessedFramesLine('Processed 30 frames...'), 30);
+  assert.equal(parseProcessedFramesLine('  Processed 3900 frames...'), 3900);
+  assert.equal(parseProcessedFramesLine('TRACKER_SYNC frames_processed=12'), null);
+});
+
+test('appendStageLog is bounded, timestamped, and rejects stale contexts', () => {
+  const log = [];
+  assert.equal(appendStageLog(log, { stage: 'accepted', message: 'ok' }, {
+    isCurrent: () => true,
+    now: () => Date.parse('2026-07-13T12:00:00.000Z'),
+  }), true);
+  assert.equal(log[0].t, '2026-07-13T12:00:00.000Z');
+  assert.equal(appendStageLog(log, { stage: 'tracker_progress', message: '10', frames: 10 }, {
+    isCurrent: () => true,
+  }), true);
+  assert.equal(appendStageLog(log, { stage: 'tracker_progress', message: '20', frames: 20 }, {
+    isCurrent: () => true,
+  }), true);
+  assert.equal(log.filter((e) => e.stage === 'tracker_progress').length, 1);
+  assert.equal(log.at(-1).frames, 20);
+  assert.equal(appendStageLog(log, { stage: 'failed', message: 'nope' }, {
+    isCurrent: () => false,
+  }), false);
+  assert.equal(log.some((e) => e.stage === 'failed'), false);
+
+  const capped = [];
+  for (let i = 0; i < 60; i += 1) {
+    appendStageLog(capped, { stage: `s${i}`, message: String(i) }, { maxEntries: 48 });
+  }
+  assert.equal(capped.length, 48);
+  assert.equal(capped[0].stage, 's12');
+});
+
+test('toClientErrorMessage strips paths and notes no new result published', () => {
+  const msg = toClientErrorMessage(new Error(
+    'Frame integrity mismatch (inputFrames=4, finalVideoFrames=3) under E:\\Flyt\\uploads\\run-x',
+  ));
+  assert.match(msg, /Frame integrity mismatch/);
+  assert.match(msg, /No new result was published/);
+  assert.doesNotMatch(msg, /E:\\\\Flyt/);
+  assert.doesNotMatch(msg, /uploads/);
+});
+
+test('summarizeTrackingValidityFromCsv counts valid frames and handles legacy', () => {
+  const dir = tempDir('flyt-validity-csv-');
+  const modern = path.join(dir, 'modern.csv');
+  fs.writeFileSync(modern, [
+    'frame,tracking_valid,occlusion_flag',
+    '0,1,0',
+    '1,0,0',
+    '2,1,1',
+    '3,1,0',
+  ].join('\n'));
+  const summary = summarizeTrackingValidityFromCsv(modern);
+  assert.equal(summary.available, true);
+  assert.equal(summary.validFrames, 2);
+  assert.equal(summary.totalFrames, 4);
+  assert.equal(summary.percent, 50);
+
+  const legacy = path.join(dir, 'legacy.csv');
+  fs.writeFileSync(legacy, [
+    'frame,proximity_distance,occlusion_flag',
+    '0,10,0',
+    '1,12,0',
+  ].join('\n'));
+  const legacySummary = summarizeTrackingValidityFromCsv(legacy);
+  assert.equal(legacySummary.available, false);
+  assert.equal(legacySummary.validFrames, null);
 });
 
 test('frame validation fails closed on missing evidence or disagreement', () => {
@@ -349,7 +438,7 @@ test('abort kills a real child process that ignores SIGTERM', async () => {
   ], {
     signal: controller.signal,
     children,
-    killOptions: { graceMs: 20, hardKillMs: 500 },
+    killOptions: { graceMs: process.platform === 'win32' ? 250 : 20, hardKillMs: 500 },
   });
 
   const deadline = Date.now() + 1000;
@@ -361,3 +450,4 @@ test('abort kills a real child process that ignores SIGTERM', async () => {
   await assert.rejects(command, (error) => error?.name === 'AbortError');
   assert.equal(children.size, 0);
 });
+

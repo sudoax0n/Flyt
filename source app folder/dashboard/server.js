@@ -8,12 +8,15 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import {
   AbortRunError,
+  appendStageLog,
   assertEventBelongsToRun,
   buildTrackerArgs,
+  createLineBuffer,
   createRunId,
   countCsvRows,
   ensureDir,
   getVideoFrameCount,
+  parseProcessedFramesLine,
   parseTrackerSync,
   prepareRunHistoryBundle,
   publishBundle,
@@ -26,6 +29,8 @@ import {
   runCommand,
   safeRemoveDir,
   safeUnlink,
+  summarizeTrackingValidityFromCsv,
+  toClientErrorMessage,
   verificationPathForRun,
   terminateChild,
   transcodeVideo,
@@ -54,7 +59,34 @@ function blankJob() {
     error: null,
     startTime: null,
     endTime: null,
+    uploadedFilename: null,
+    stageLog: [],
+    resultPublished: false,
+    durationMs: null,
+    integrity: null,
+    trackingValidity: null,
   };
+}
+
+function jobDurationMs(jobState, now = Date.now()) {
+  if (!jobState?.startTime) return null;
+  if (jobState.endTime) return Math.max(0, jobState.endTime - jobState.startTime);
+  return Math.max(0, now - jobState.startTime);
+}
+
+function withLiveTiming(jobState) {
+  const durationMs = jobDurationMs(jobState);
+  return {
+    ...jobState,
+    stageLog: Array.isArray(jobState.stageLog) ? [...jobState.stageLog] : [],
+    durationMs,
+    elapsedMs: durationMs,
+  };
+}
+
+function pushStage(jobState, entry, isCurrentFn) {
+  if (!Array.isArray(jobState.stageLog)) jobState.stageLog = [];
+  return appendStageLog(jobState.stageLog, entry, { isCurrent: isCurrentFn });
 }
 
 function parseAllowedOrigins(value) {
@@ -140,26 +172,51 @@ export function createFlytServer(options = {}) {
         killOptions,
       },
     )),
-    runTracker: options.services?.runTracker || ((inputPath, outputs, overrides, context) => runCommand(
-      pythonExe,
-      buildTrackerArgs(trackerScript, inputPath, outputs, overrides, defaults),
-      {
-        spawnFn,
-        signal: context.controller.signal,
-        children: context.children,
-        killOptions,
-        onStdout: (text) => {
-          const match = text.match(/Processed (\d+) frames/);
-          if (match && isCurrent(context)) {
-            job.framesProcessed = Number(match[1]);
-            job.progress = `Processed ${job.framesProcessed} frames...`;
-          } else if (text.includes('Tracking completed') && isCurrent(context)) {
-            job.progress = 'Validating tracker output...';
-          }
+    runTracker: options.services?.runTracker || ((inputPath, outputs, overrides, context) => {
+      const lineBuffer = createLineBuffer((line) => {
+        if (!isCurrent(context)) return;
+        const frames = parseProcessedFramesLine(line);
+        if (frames !== null) {
+          job.framesProcessed = frames;
+          const total = job.totalFrames;
+          const pct = Number.isFinite(total) && total > 0
+            ? Math.min(100, Math.round((frames / total) * 100))
+            : null;
+          job.progress = pct !== null
+            ? `Processed ${frames} / ${total} frames (${pct}%)`
+            : `Processed ${frames} frames...`;
+          pushStage(job, {
+            stage: 'tracker_progress',
+            message: job.progress,
+            frames,
+            total: Number.isFinite(total) ? total : undefined,
+          }, () => isCurrent(context));
+          return;
+        }
+        if (/tracking completed/i.test(line)) {
+          job.progress = 'Validating tracker output...';
+          pushStage(job, {
+            stage: 'tracker_validating',
+            message: 'Tracker finished; validating output...',
+          }, () => isCurrent(context));
+        }
+      });
+      // -u + PYTHONUNBUFFERED: force line-level progress through the pipe so
+      // the dashboard can show live framesProcessed instead of a final jump.
+      return runCommand(
+        pythonExe,
+        ['-u', ...buildTrackerArgs(trackerScript, inputPath, outputs, overrides, defaults)],
+        {
+          spawnFn,
+          signal: context.controller.signal,
+          children: context.children,
+          killOptions,
+          env: { ...process.env, PYTHONUNBUFFERED: '1' },
+          onStdout: (text) => lineBuffer.push(text),
+          onStderr: (text) => console.error(`[Tracker] ${text.trim()}`),
         },
-        onStderr: (text) => console.error(`[Tracker] ${text.trim()}`),
-      },
-    )),
+      ).finally(() => lineBuffer.flush());
+    }),
     transcode: options.services?.transcode || ((rawPath, finalPath, context) => transcodeVideo(
       ffmpegPath,
       rawPath,
@@ -364,14 +421,24 @@ export function createFlytServer(options = {}) {
     const ensureCurrent = () => {
       if (!isCurrent(context)) throw new AbortRunError();
     };
+    const stage = (entry) => pushStage(job, entry, () => isCurrent(context));
 
     try {
       job.status = 'processing';
       job.progress = 'Counting input frames...';
+      stage({ stage: 'count_input', message: 'Counting input frames...' });
       const inputFrames = await services.countFrames(context.inputPath, context);
       ensureCurrent();
+      job.totalFrames = inputFrames;
+      job.progress = `Input frames counted: ${inputFrames}. Starting tracker...`;
+      stage({
+        stage: 'input_counted',
+        message: `Input frames: ${inputFrames}`,
+        total: inputFrames,
+      });
 
       job.progress = 'Running tracker...';
+      stage({ stage: 'tracker_started', message: 'Tracker started', total: inputFrames });
       const trackerResult = await services.runTracker(
         context.inputPath,
         outputs,
@@ -380,7 +447,9 @@ export function createFlytServer(options = {}) {
       );
       ensureCurrent();
       if (trackerResult.code !== 0) {
-        throw new Error(`Tracker exited with code ${trackerResult.code}: ${trackerResult.stderr.slice(-500)}`);
+        // Keep detailed stderr in server logs only.
+        console.error(`[Tracker] exit ${trackerResult.code}: ${String(trackerResult.stderr || '').slice(-2000)}`);
+        throw new Error(`Tracker exited with code ${trackerResult.code}`);
       }
 
       const syncInfo = parseTrackerSync(trackerResult.stdout);
@@ -389,18 +458,41 @@ export function createFlytServer(options = {}) {
       if (!fs.existsSync(outputs.rawVideo)) throw new Error('Tracker raw video missing');
       if (!fs.existsSync(outputs.events)) throw new Error('Tracker events.json missing');
 
+      job.framesProcessed = syncInfo.framesProcessed;
+      job.progress = 'Validating tracker output...';
+      stage({
+        stage: 'tracker_completed',
+        message: `Tracker completed (${syncInfo.framesProcessed} frames)`,
+        frames: syncInfo.framesProcessed,
+        total: inputFrames,
+      });
+
       const csvRows = countCsvRows(outputs.csv);
       job.progress = 'Counting raw output frames...';
+      stage({ stage: 'count_raw', message: 'Counting raw output frames...' });
       const rawVideoFrames = await services.countFrames(outputs.rawVideo, context);
       ensureCurrent();
+      stage({
+        stage: 'raw_counted',
+        message: `Raw video frames: ${rawVideoFrames}`,
+        frames: rawVideoFrames,
+      });
 
       job.progress = 'Transcoding browser video...';
+      stage({ stage: 'transcoding', message: 'H.264 transcoding browser video...' });
       await services.transcode(outputs.rawVideo, outputs.browserVideo, context);
       ensureCurrent();
+      stage({ stage: 'transcoded', message: 'H.264 transcode complete' });
 
       job.progress = 'Counting final output frames...';
+      stage({ stage: 'count_final', message: 'Counting final H.264 frames...' });
       const finalVideoFrames = await services.countFrames(outputs.browserVideo, context);
       ensureCurrent();
+      stage({
+        stage: 'final_counted',
+        message: `Final video frames: ${finalVideoFrames}`,
+        frames: finalVideoFrames,
+      });
 
       const integrity = validateFrameIntegrity({
         syncInfo,
@@ -411,12 +503,34 @@ export function createFlytServer(options = {}) {
       });
       const fps = readEventsFps(outputs.events);
       scopeEventsForRun(outputs.events, context.runId, outputs.events);
+      const trackingValidity = summarizeTrackingValidityFromCsv(outputs.csv);
+      const completedAt = Date.now();
+      const durationMs = completedAt - context.startedAt;
+      const integritySummary = {
+        passed: true,
+        inputFrames: integrity.inputFrames,
+        trackerFrames: integrity.trackerFrames,
+        csvRows: integrity.csvRows,
+        rawVideoFrames: integrity.rawVideoFrames,
+        finalVideoFrames: integrity.finalVideoFrames,
+        syncOk: integrity.syncOk,
+      };
+      stage({ stage: 'integrity_passed', message: 'Frame integrity passed' });
+
       const metadata = {
         ...integrity,
         runId: context.runId,
         expectedVideoFrames: syncInfo.expectedVideoFrames,
         fps,
-        timestamp: new Date().toISOString(),
+        timestamp: new Date(completedAt).toISOString(),
+        filename: context.filename,
+        startTime: context.startedAt,
+        endTime: completedAt,
+        durationMs,
+        stageLog: Array.isArray(job.stageLog) ? [...job.stageLog] : [],
+        frameIntegrity: integritySummary,
+        trackingValidity,
+        resultPublished: true,
       };
       writeJson(outputs.metadata, metadata);
       writeJson(outputs.verification, { version: 1, run_id: context.runId, reviews: [] });
@@ -426,16 +540,23 @@ export function createFlytServer(options = {}) {
         historyMetaPath,
         historyIndexOutput: outputs.historyIndex,
         filename: context.filename,
-        durationSec: (Date.now() - context.startedAt) / 1000,
+        durationSec: durationMs / 1000,
         fps,
         totalFrames: integrity.inputFrames,
         csvSrc: outputs.csv,
         eventsSrc: outputs.events,
         verificationSrc: outputs.verification,
+        metadataSrc: outputs.metadata,
+        trackingValidity,
+        frameIntegrity: integritySummary,
+        stageLog: metadata.stageLog,
+        startTime: context.startedAt,
+        endTime: completedAt,
       });
       ensureCurrent();
 
       job.progress = 'Publishing validated current and historical results...';
+      stage({ stage: 'publishing', message: 'Publishing validated results...' });
       services.publish([
         { source: outputs.csv, destination: path.join(publicDir, 'data.csv') },
         { source: outputs.events, destination: path.join(publicDir, 'events.json') },
@@ -445,6 +566,19 @@ export function createFlytServer(options = {}) {
       ], context.token);
       ensureCurrent();
 
+      stage({ stage: 'completed', message: `Published run ${context.runId}` });
+      // Best-effort: refresh published metadata with the final completed stage entry.
+      // Primary metadata was already published transactionally above.
+      try {
+        metadata.stageLog = Array.isArray(job.stageLog) ? [...job.stageLog] : metadata.stageLog;
+        const publishedMeta = path.join(publicDir, 'run_metadata.json');
+        if (fs.existsSync(publishedMeta)) writeJson(publishedMeta, metadata);
+        const historyMetaDest = path.join(historyDir, context.runId, 'run_metadata.json');
+        if (fs.existsSync(historyMetaDest)) writeJson(historyMetaDest, metadata);
+      } catch (metaRefreshError) {
+        console.error(`[Server] Could not refresh run metadata log: ${metaRefreshError.message}`);
+      }
+
       job = {
         ...job,
         frameCount: integrity.inputFrames,
@@ -452,16 +586,31 @@ export function createFlytServer(options = {}) {
         totalFrames: integrity.inputFrames,
         status: 'done',
         progress: `Tracking complete! Processed ${integrity.inputFrames} frames.`,
-        endTime: Date.now(),
+        endTime: completedAt,
+        durationMs,
+        resultPublished: true,
+        integrity: integritySummary,
+        trackingValidity,
+        uploadedFilename: context.filename,
       };
     } catch (error) {
       if (isCurrent(context)) {
+        const endTime = Date.now();
+        const clientError = error?.name === 'AbortError'
+          ? 'Run was cancelled.'
+          : toClientErrorMessage(error);
+        pushStage(job, {
+          stage: 'failed',
+          message: clientError,
+        }, () => isCurrent(context));
         job = {
           ...job,
           status: 'error',
           progress: '',
-          error: error.message,
-          endTime: Date.now(),
+          error: clientError,
+          endTime,
+          durationMs: endTime - context.startedAt,
+          resultPublished: false,
         };
       }
       if (error?.name !== 'AbortError') console.error(`[Server] Run failed: ${error.message}`);
@@ -475,7 +624,7 @@ export function createFlytServer(options = {}) {
     }
   }
 
-  app.get('/api/status', (_req, res) => res.json({ ...job }));
+  app.get('/api/status', (_req, res) => res.json(withLiveTiming(job)));
 
   app.post('/api/upload', reserveUpload, upload.single('video'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No video file provided' });
@@ -498,7 +647,13 @@ export function createFlytServer(options = {}) {
       progress: 'Upload complete. Starting validation pipeline...',
       uploadedFilename: context.filename,
       startTime: context.startedAt,
+      resultPublished: false,
+      stageLog: [],
     };
+    pushStage(job, {
+      stage: 'accepted',
+      message: `Upload accepted: ${context.filename}`,
+    }, () => isCurrent(context));
     context.done = executeRun(context).catch(() => {});
     return res.json({ success: true, runId: context.runId });
   });

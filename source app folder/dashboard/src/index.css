@@ -2,71 +2,1548 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ============================================================
+   Flyt Lab Notebook design system
+   Warm neutral canvas, editorial hierarchy, operational UI.
+   ============================================================ */
+
+:root {
+  --canvas: #fbfbfa;
+  --surface: #ffffff;
+  --ink: #252523;
+  --muted: #74736e;
+  --faint: #a3a19b;
+  --line: #e8e7e3;
+  --line-strong: #cecdc8;
+  --hover: #f0efec;
+  --green-bg: #edf3ec;
+  --green: #346538;
+  --blue-bg: #e8f2f8;
+  --blue: #246486;
+  --yellow-bg: #fbf3db;
+  --yellow: #886007;
+  --red-bg: #fbeaec;
+  --red: #983a3a;
+  --amber-bg: #fbf3db;
+  --amber-ink: #886007;
+  --radius: 9px;
+  --font-sans: "Helvetica Neue", Arial, system-ui, sans-serif;
+  --font-serif: Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+  --chart-1: #246486;
+  --chart-2: #a3792b;
+  --chart-ink: #252523;
+  --chart-grid: #ecebe7;
+  --video-bg: #20211f;
+  --focus: #246486;
+  --top-h: 64px;
+}
+
+.dark {
+  --canvas: #141413;
+  --surface: #1c1c1a;
+  --ink: #f2f1ec;
+  --muted: #a3a19b;
+  --faint: #74736e;
+  --line: #2e2e2b;
+  --line-strong: #454540;
+  --hover: #252523;
+  --green-bg: #1c2a1e;
+  --green: #8fbc91;
+  --blue-bg: #1a2830;
+  --blue: #7eb3cf;
+  --yellow-bg: #2a2414;
+  --yellow: #d4b36a;
+  --red-bg: #2a1a1c;
+  --red: #d48a8a;
+  --amber-bg: #2a2414;
+  --amber-ink: #d4b36a;
+  --chart-1: #7eb3cf;
+  --chart-2: #d4b36a;
+  --chart-ink: #e8e7e3;
+  --chart-grid: #2e2e2b;
+  --video-bg: #0d0d0c;
+  --focus: #7eb3cf;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--canvas);
+}
+
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  min-width: 320px;
+  color: var(--ink);
+  background: var(--canvas);
+  font: 14px/1.55 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+/* Visible keyboard focus for interactive controls */
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ---------- App shell ---------- */
+
+.flyt-app {
+  min-height: 100vh;
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+.flyt-top {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  min-height: var(--top-h);
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--canvas) 95%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.flyt-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-size: 15px;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  text-align: left;
+}
+
+.flyt-brand img {
+  width: 25px;
+  height: 25px;
+  display: block;
+  border-radius: 5px;
+}
+
+.flyt-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.flyt-tab {
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 12px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  min-height: 36px;
+}
+
+.flyt-tab:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.flyt-tab[aria-current="page"],
+.flyt-tab.active {
+  background: var(--hover);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.flyt-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.flyt-btn {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 12px;
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.flyt-btn:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--hover);
+}
+
+.flyt-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.flyt-btn-dark {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--canvas);
+}
+
+.flyt-btn-dark:hover:not(:disabled) {
+  opacity: 0.92;
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.flyt-btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  min-width: 36px;
+  padding: 7px;
+  justify-content: center;
+}
+
+.flyt-btn-ghost:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+  border-color: transparent;
+}
+
+.flyt-btn-confirm {
+  border: 1px solid #cadfc9;
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.flyt-btn-confirm[aria-pressed="true"],
+.flyt-btn-confirm.is-active {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+}
+
+.flyt-btn-reject {
+  border: 1px solid #eccfd2;
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.flyt-btn-reject[aria-pressed="true"],
+.flyt-btn-reject.is-active {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+}
+
+.flyt-btn-cancel {
+  border-color: color-mix(in srgb, var(--red) 35%, var(--line));
+  background: var(--red-bg);
+  color: var(--red);
+  justify-content: center;
+}
+
+.flyt-btn-cancel:hover:not(:disabled) {
+  border-color: var(--red);
+  background: color-mix(in srgb, var(--red-bg) 70%, var(--surface));
+}
+
+.flyt-btn-cancel-compact {
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 11px;
+  margin-left: auto;
+}
+
+.flyt-progress-bar {
+  position: sticky;
+  top: var(--top-h);
+  z-index: 25;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 8px 28px;
+  background: var(--amber-bg);
+  border-bottom: 1px solid var(--line);
+  color: var(--amber-ink);
+  font-size: 12px;
+}
+
+.flyt-progress-bar .mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.flyt-loader-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 18px;
+}
+
+.flyt-notice {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--amber-ink) 25%, var(--line));
+  background: var(--amber-bg);
+  color: var(--amber-ink);
+  font-size: 13px;
+}
+
+.flyt-page {
+  width: min(1280px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 40px 0 72px;
+}
+
+.flyt-page.compact {
+  width: min(760px, calc(100% - 32px));
+}
+
+/* ---------- Typography ---------- */
+
+.flyt-serif {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+.flyt-eyeline {
+  margin-bottom: 9px;
+  color: var(--muted);
+  font: 12px var(--font-mono);
+}
+
+.flyt-h1 {
+  margin: 0;
+  font: 500 34px/1.12 var(--font-serif);
+  letter-spacing: -0.025em;
+  color: var(--ink);
+}
+
+.flyt-h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.flyt-h2-serif {
+  margin: 0;
+  font: 500 22px/1.15 var(--font-serif);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.flyt-h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.flyt-lead {
+  margin: 9px 0 0;
+  max-width: 66ch;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.flyt-muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.flyt-mono {
+  font-family: var(--font-mono);
+}
+
+/* ---------- Status / badges ---------- */
+
+.flyt-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: var(--green-bg);
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.flyt-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.flyt-status.warn {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
+.flyt-status.muted {
+  background: var(--hover);
+  color: var(--muted);
+}
+
+.flyt-status.danger {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.flyt-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--surface);
+}
+
+.flyt-badge.detected {
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+.flyt-badge.confirmed {
+  background: var(--green-bg);
+  border-color: #cadfc9;
+  color: var(--green);
+}
+
+.flyt-badge.rejected {
+  background: var(--red-bg);
+  border-color: #eccfd2;
+  color: var(--red);
+}
+
+.flyt-badge.pending {
+  background: var(--hover);
+  color: var(--faint);
+}
+
+/* ---------- Dashboard layout ---------- */
+
+.flyt-dash {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 290px;
+  gap: 48px;
+  align-items: start;
+}
+
+.flyt-dash-main {
+  min-width: 0;
+}
+
+.flyt-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.flyt-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 34px;
+}
+
+.flyt-summary > div {
+  padding: 20px 20px 20px 0;
+}
+
+.flyt-summary > div + div {
+  padding-left: 20px;
+  border-left: 1px solid var(--line);
+}
+
+.flyt-summary dt {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0;
+}
+
+.flyt-summary dd {
+  margin: 5px 0 0;
+  font-size: 24px;
+  line-height: 1.1;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+}
+
+.flyt-summary small {
+  display: block;
+  margin-top: 6px;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.flyt-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 0 0 13px;
+}
+
+.flyt-section-head a,
+.flyt-section-link {
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.flyt-section-link:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+/* ---------- Cards / video / charts ---------- */
+
+.flyt-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.flyt-video-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.flyt-video-frame {
+  aspect-ratio: 16 / 9;
+  background: var(--video-bg);
+  display: grid;
+  place-items: center;
+}
+
+.flyt-video-frame video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  background: #000;
+}
+
+.flyt-video-placeholder {
+  padding: 24px;
+  text-align: center;
+  color: var(--faint);
+  font-size: 12px;
+  max-width: 36ch;
+}
+
+.flyt-video-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 14px;
+  color: var(--muted);
+  font-size: 11px;
+  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.flyt-video-caption code,
+.flyt-video-caption .mono {
+  color: var(--ink);
+  font: 11px var(--font-mono);
+}
+
+.flyt-frame-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 88%, var(--canvas));
+}
+
+.flyt-frame-controls label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.flyt-input {
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.flyt-input:focus-visible {
+  border-color: var(--focus);
+}
+
+.flyt-input.mono {
+  font-family: var(--font-mono);
+  width: 6.5rem;
+}
+
+.flyt-charts {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.flyt-chart {
+  padding: 18px;
+  min-height: 250px;
+  display: flex;
+  flex-direction: column;
+}
+
+.flyt-chart p {
+  margin: 4px 0 14px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.flyt-chart-body {
+  flex: 1;
+  min-height: 180px;
+  width: 100%;
+}
+
+.flyt-validity {
+  display: grid;
+  align-content: space-between;
+  min-height: 250px;
+  padding: 20px;
+  background: var(--blue-bg);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+}
+
+.flyt-validity h3 {
+  margin: 0;
+  font: 500 20px/1.2 var(--font-serif);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.flyt-validity p {
+  margin: 8px 0 0;
+  max-width: 34ch;
+  color: color-mix(in srgb, var(--blue) 70%, var(--muted));
+  font-size: 12px;
+}
+
+.flyt-validity-number {
+  margin-top: 34px;
+  font-size: 50px;
+  line-height: 0.9;
+  font-weight: 600;
+  letter-spacing: -0.055em;
+  color: var(--blue);
+  font-variant-numeric: tabular-nums;
+}
+
+.flyt-validity-number small {
+  display: block;
+  margin-top: 11px;
+  font-size: 11px;
+  letter-spacing: 0;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--blue) 80%, var(--muted));
+}
+
+/* ---------- Run record ---------- */
+
+.flyt-record {
+  margin-top: 34px;
+}
+
+.flyt-record-row {
+  display: grid;
+  grid-template-columns: 110px 1fr auto;
+  gap: 18px;
+  align-items: center;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+
+.flyt-record-row:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+.flyt-record-row time {
+  color: var(--muted);
+  font: 11px var(--font-mono);
+}
+
+.flyt-record-row strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.flyt-record-row span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.flyt-record-row code {
+  font: 10px var(--font-mono);
+  color: var(--green);
+  white-space: nowrap;
+}
+
+.flyt-record-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 18px;
+  font-size: 12px;
+}
+
+.flyt-record-meta dt {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0 0 2px;
+}
+
+.flyt-record-meta dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* ---------- Review aside ---------- */
+
+.flyt-aside {
+  min-width: 0;
+}
+
+.flyt-aside-inner {
+  position: sticky;
+  top: calc(var(--top-h) + 24px);
+  display: grid;
+  gap: 18px;
+}
+
+.flyt-aside-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.flyt-count {
+  display: grid;
+  place-items: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 50%;
+  background: var(--yellow-bg);
+  color: var(--yellow);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.flyt-aside-copy {
+  margin: -6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.flyt-event-list {
+  border-top: 1px solid var(--line);
+  max-height: min(48vh, 420px);
+  overflow-y: auto;
+}
+
+.flyt-event {
+  display: block;
+  width: 100%;
+  padding: 14px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+  border-radius: 0;
+}
+
+.flyt-event:hover .flyt-event-name,
+.flyt-event.active .flyt-event-name {
+  color: var(--blue);
+}
+
+.flyt-event.active {
+  background: color-mix(in srgb, var(--blue-bg) 85%, transparent);
+}
+
+.flyt-event-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.flyt-event-name {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.flyt-event time {
+  color: var(--muted);
+  font: 10px var(--font-mono);
+}
+
+.flyt-event small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.flyt-event-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.flyt-review-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.flyt-review-buttons .flyt-btn {
+  min-height: 38px;
+  font-size: 12px;
+  justify-content: center;
+}
+
+.flyt-reference {
+  overflow: hidden;
+}
+
+.flyt-reference img {
+  display: block;
+  width: 100%;
+  max-height: 126px;
+  object-fit: contain;
+  padding: 13px;
+  background: color-mix(in srgb, var(--canvas) 70%, var(--surface));
+}
+
+.flyt-reference > div {
+  padding: 13px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.flyt-reference h3 {
+  margin: 0 0 4px;
+  font-size: 12px;
+}
+
+.flyt-reference p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.flyt-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.flyt-filter input {
+  accent-color: var(--blue);
+}
+
+/* ---------- Upload / History / empty ---------- */
+
+.flyt-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 28px;
+}
+
+.flyt-dropzone {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--canvas) 60%, var(--surface));
+  padding: 48px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.flyt-dropzone:hover,
+.flyt-dropzone:focus-visible {
+  background: var(--hover);
+  border-color: var(--muted);
+}
+
+.flyt-dropzone h3 {
+  margin: 12px 0 4px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.flyt-dropzone p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.flyt-error {
+  border: 1px solid #eccfd2;
+  background: var(--red-bg);
+  color: var(--red);
+  border-radius: 6px;
+  padding: 14px;
+  margin-bottom: 18px;
+  font-size: 12px;
+}
+
+.flyt-error p {
+  margin: 0 0 6px;
+}
+
+.flyt-error p:last-child {
+  margin-bottom: 0;
+}
+
+.flyt-stage-list {
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  margin-top: 12px;
+}
+
+.flyt-stage-list li {
+  display: flex;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+}
+
+.flyt-stage-list li:last-child {
+  border-bottom: 0;
+}
+
+.flyt-stage-list time {
+  font-family: var(--font-mono);
+  color: var(--faint);
+  flex-shrink: 0;
+}
+
+.flyt-meter {
+  height: 6px;
+  width: 100%;
+  background: var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.flyt-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--ink);
+  transition: width 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.flyt-meter-lg {
+  height: 10px;
+}
+
+.flyt-meter.is-indeterminate > span {
+  width: 34% !important;
+  max-width: 140px;
+  background: var(--ink);
+  opacity: 0.85;
+  animation: flyt-shimmer 1.25s ease-in-out infinite;
+  transition: none;
+  border-radius: inherit;
+}
+
+.flyt-loader-card {
+  text-align: center;
+  padding: 28px 28px 22px;
+}
+
+.flyt-loader-visual {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 18px;
+}
+
+.flyt-loader-title {
+  margin: 0 0 6px;
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.flyt-loader-meta {
+  margin: 0 0 18px;
+  font-size: 11px;
+}
+
+.flyt-loader-meter-block {
+  text-align: left;
+  margin-bottom: 4px;
+}
+
+.flyt-loader-stats {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.flyt-loader-kpis {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 18px 28px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.flyt-loader-kpis > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 72px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.flyt-kpi-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/* Determinate ring: conic-gradient driven by --flyt-ring-pct */
+.flyt-ring {
+  --flyt-ring-pct: 0;
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  background:
+    conic-gradient(
+      from -90deg,
+      var(--ink) calc(var(--flyt-ring-pct) * 1%),
+      var(--line) 0
+    );
+  display: grid;
+  place-items: center;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 80%, transparent);
+  transition: background 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.flyt-ring.is-live {
+  animation: flyt-ring-pulse 2.4s ease-in-out infinite;
+}
+
+.flyt-ring-inner {
+  width: 86px;
+  height: 86px;
+  border-radius: 50%;
+  background: var(--surface);
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 1px;
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.flyt-ring-value {
+  font-size: 28px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--ink);
+}
+
+.flyt-ring-unit {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Indeterminate orbit while counting / pre-tracker */
+.flyt-orbit {
+  position: relative;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  animation: flyt-orbit-spin 2.8s linear infinite;
+}
+
+.flyt-orbit-core {
+  position: absolute;
+  inset: 28px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ink) 8%, var(--surface));
+  border: 1px solid var(--line);
+  animation: flyt-orbit-spin 2.8s linear infinite reverse;
+}
+
+.flyt-orbit-dot {
+  position: absolute;
+  top: -4px;
+  left: calc(50% - 4px);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+@keyframes flyt-shimmer {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+
+@keyframes flyt-orbit-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes flyt-ring-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.06); }
+}
+
+.flyt-history-table {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.flyt-history-head,
+.flyt-history-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 0.8fr 0.8fr 0.7fr;
+  gap: 8px;
+  padding: 14px 16px;
+  align-items: center;
+}
+
+.flyt-history-head {
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: color-mix(in srgb, var(--canvas) 55%, var(--surface));
+}
+
+.flyt-history-row {
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flyt-history-row:last-child {
+  border-bottom: 0;
+}
+
+.flyt-history-row:hover,
+.flyt-history-row:focus-visible {
+  background: var(--hover);
+}
+
+.flyt-empty {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.flyt-empty h3 {
+  margin: 0 0 8px;
+  font: 500 22px/1.2 var(--font-serif);
+  color: var(--ink);
+}
+
+/* ---------- Modal ---------- */
+
+.flyt-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: color-mix(in srgb, var(--ink) 28%, transparent);
+}
+
+.flyt-modal {
+  width: min(420px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 28px;
+  position: relative;
+  max-height: min(90vh, 720px);
+  overflow-y: auto;
+  box-shadow: 0 16px 48px color-mix(in srgb, #000 12%, transparent);
+}
+
+.flyt-modal h2 {
+  margin: 0 0 4px;
+  font: 500 22px/1.2 var(--font-serif);
+}
+
+.flyt-field {
+  margin-bottom: 18px;
+}
+
+.flyt-field label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.flyt-field p {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.flyt-field input {
+  width: 100%;
+}
+
+.flyt-modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.flyt-modal-actions .flyt-btn-dark {
+  flex: 1;
+  justify-content: center;
+}
+
+.flyt-spin {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--ink);
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: flyt-spin 0.7s linear infinite;
+}
+
+@keyframes flyt-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 960px) {
+  .flyt-top {
+    grid-template-columns: auto 1fr auto;
+    padding: 0 18px;
+  }
+
+  .flyt-page {
+    width: min(760px, calc(100% - 32px));
+    padding-top: 28px;
+  }
+
+  .flyt-dash {
+    grid-template-columns: 1fr;
+    gap: 36px;
+  }
+
+  .flyt-aside-inner {
+    position: static;
+  }
+
+  .flyt-event-list {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    border: 0;
+    max-height: none;
+  }
+
+  .flyt-event {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px;
+    background: var(--surface);
+  }
+
+  .flyt-event.active {
+    border-color: color-mix(in srgb, var(--blue) 40%, var(--line));
+  }
+
+  .flyt-reference {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+  }
+
+  .flyt-reference > div {
+    border-top: 0;
+    border-left: 1px solid var(--line);
+  }
+
+  .flyt-history-head,
+  .flyt-history-row {
+    grid-template-columns: 1.2fr 1fr 0.7fr 0.7fr;
+  }
+
+  .flyt-history-head > :nth-child(5),
+  .flyt-history-row > :nth-child(5) {
+    display: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .flyt-top {
+    height: auto;
+    min-height: 56px;
+    grid-template-columns: 1fr auto;
+    padding: 8px 14px;
+  }
+
+  .flyt-tabs {
+    position: fixed;
+    z-index: 40;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 58px;
+    padding: 6px 8px;
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+    justify-content: stretch;
+  }
+
+  .flyt-tab {
+    flex: 1;
+    font-size: 11px;
+    padding: 6px 4px;
+    min-height: 44px;
+  }
+
+  .flyt-page {
+    width: calc(100% - 28px);
+    padding: 24px 0 86px;
+  }
+
+  .flyt-title-row {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .flyt-h1 {
+    font-size: 28px;
+  }
+
+  .flyt-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .flyt-summary > div:nth-child(3) {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
+  }
+
+  .flyt-summary > div:nth-child(4) {
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
+  }
+
+  .flyt-charts {
+    grid-template-columns: 1fr;
+  }
+
+  .flyt-record-row {
+    grid-template-columns: 90px 1fr;
+  }
+
+  .flyt-record-row code {
+    grid-column: 2;
+  }
+
+  .flyt-record-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .flyt-event-list {
+    grid-template-columns: 1fr;
+  }
+
+  .flyt-reference {
+    grid-template-columns: 1fr;
+  }
+
+  .flyt-reference > div {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .flyt-history-head,
+  .flyt-history-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .flyt-history-head > :nth-child(n + 3),
+  .flyt-history-row > :nth-child(n + 3) {
+    display: none;
+  }
+
+  .flyt-top-actions .hide-sm {
+    display: none;
+  }
 }
 
 /* ============================================================
-   Print / PDF report styles (Task D / K-07)
-   Triggered by "Export PDF Report" → window.print().
-   Hides nav, sidebar, buttons, and the tracking-feed video; shows
-   only the analytics charts + metric cards for a clean paper/PDF export.
+   Print / PDF report
    ============================================================ */
 @media print {
-  /* Neutral palette: PDF reads better on white regardless of dark-mode UI. */
-  html, body {
+  html,
+  body {
     background: #ffffff !important;
     color: #18181b !important;
   }
 
-  /* Full-bleed: drop the app's max-width padding. */
-  .max-w-6xl {
-    max-width: none !important;
-    padding: 0 !important;
-  }
-
-  /* Hide the sidebar, top progress bar, and any element tagged no-print
-     (export buttons, live-feed header chip, jump-to-frame row). */
-  aside,
+  .flyt-top,
+  .flyt-progress-bar,
+  .flyt-aside,
   .no-print {
     display: none !important;
   }
 
-  /* Force the main content area to use the full page width. */
-  main {
-    overflow: visible !important;
-    height: auto !important;
+  .flyt-page {
+    width: 100% !important;
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
 
-  /* Make the main content area span full width once the sidebar is gone. */
-  .flex.h-full.w-full {
+  .flyt-dash {
     display: block !important;
   }
 
-  /* Keep chart cards on a white background with a visible border. */
-  .bg-white,
-  .dark\:bg-\[\#000000\] {
+  .flyt-app,
+  .flyt-page,
+  main {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  .flyt-card,
+  .flyt-video-card,
+  .flyt-validity,
+  .flyt-chart {
     background: #ffffff !important;
     border-color: #d4d4d8 !important;
     color: #18181b !important;
     break-inside: avoid;
   }
 
-  /* Charts: let them render at a print-friendly height. */
+  .flyt-chart-body,
+  .h-\[220px\],
   .h-\[260px\] {
-    height: 220px !important;
+    height: 200px !important;
   }
 
-  /* Reset the app's no-scroll / full-height shell so content flows. */
-  .h-screen,
-  .overflow-hidden {
-    height: auto !important;
-    overflow: visible !important;
-  }
-
-  /* Avoid awkward page breaks inside a metric card. */
-  .p-5, .p-6, .p-8 {
-    break-inside: avoid;
+  .flyt-h1,
+  .flyt-h2-serif,
+  .flyt-validity h3 {
+    color: #18181b !important;
   }
 }

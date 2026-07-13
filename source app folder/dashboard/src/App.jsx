@@ -1,26 +1,35 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Papa from 'papaparse';
-import { prismDistance, prismVelocity, proximityValue } from './metrics.js';
-import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, 
-  ScatterChart, Scatter, ZAxis
+import { prismDistance, prismVelocity, proximityValue, summarizeTrackingValidity } from './metrics.js';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area,
+  ScatterChart, Scatter, ZAxis,
 } from 'recharts';
 import {
-  Bug, Clock, UploadCloud, FolderKanban, Settings, Home, Sun, Moon,
-  X, Check, DownloadCloud, FileText, ChevronDown,
+  UploadCloud, Settings, Sun, Moon, X, Check, DownloadCloud, FileText, ChevronDown,
 } from 'lucide-react';
 
-// Custom minimalist tooltip
+const CHART_COLORS = {
+  fly1: 'var(--chart-1)',
+  fly2: 'var(--chart-2)',
+  prox: 'var(--chart-ink)',
+  grid: 'var(--chart-grid)',
+  tick: 'var(--faint)',
+};
+
+// Lab notebook chart tooltip (compact, tabular)
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
     return (
-      <div className="bg-white dark:bg-[#000000] border border-zinc-200 dark:border-zinc-800 p-3 shadow-md dark:shadow-none text-xs rounded-sm z-50">
-        <p className="font-semibold text-zinc-900 dark:text-zinc-100 mb-2">Frame / Unit: {label}</p>
-        <div className="flex flex-col gap-1">
+      <div className="flyt-card" style={{ padding: '10px 12px', fontSize: 11, zIndex: 50 }}>
+        <p style={{ margin: '0 0 6px', fontWeight: 650 }}>Frame {label}</p>
+        <div style={{ display: 'grid', gap: 4 }}>
           {payload.map((entry, index) => (
-            <p key={index} className="flex justify-between gap-4">
-              <span className="capitalize text-zinc-600 dark:text-zinc-400">{entry.name ? entry.name.replace('_', ' ') : 'Value'}:</span> 
-              <span className="font-medium text-zinc-900 dark:text-white uppercase">{typeof entry.value === 'number' ? entry.value.toFixed(1) : entry.value}</span>
+            <p key={index} style={{ margin: 0, display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+              <span style={{ color: 'var(--muted)' }}>{entry.name ? entry.name.replace('_', ' ') : 'Value'}</span>
+              <span className="flyt-mono" style={{ fontWeight: 600 }}>
+                {typeof entry.value === 'number' ? entry.value.toFixed(1) : entry.value}
+              </span>
             </p>
           ))}
         </div>
@@ -40,9 +49,78 @@ function formatRunDate(isoTimestamp) {
   });
 }
 
-function formatTimeRange(startSec, endSec) {
-  const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-  return `${fmt(startSec)} - ${fmt(endSec)}`;
+function formatClock(sec) {
+  if (!Number.isFinite(sec)) return '00:00';
+  const s = Math.max(0, Math.floor(sec));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+}
+
+function shortRunId(runId) {
+  if (!runId) return 'n/a';
+  const value = String(runId);
+  if (value.length <= 22) return value;
+  return `${value.slice(0, 12)}...${value.slice(-6)}`;
+}
+
+function formatDurationMs(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return 'n/a';
+  const totalSec = Math.round(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m <= 0) return `${s}s`;
+  return `${m}m ${String(s).padStart(2, '0')}s`;
+}
+
+function formatStageTime(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  } catch {
+    return '';
+  }
+}
+
+function formatCount(n) {
+  if (!Number.isFinite(n)) return 'n/a';
+  return Number(n).toLocaleString();
+}
+
+function stageLabel(stage) {
+  const map = {
+    accepted: 'Input accepted',
+    count_input: 'Counting input frames',
+    input_counted: 'Input frames counted',
+    tracker_started: 'Tracker started',
+    tracker_progress: 'Tracking in progress',
+    tracker_validating: 'Validating tracker output',
+    tracker_completed: 'Tracking completed',
+    count_raw: 'Counting raw output frames',
+    raw_counted: 'Raw frames counted',
+    transcoding: 'H.264 transcoding',
+    transcoded: 'Transcode complete',
+    count_final: 'Counting final frames',
+    final_counted: 'Final frames counted',
+    integrity_passed: 'Frame counts verified',
+    publishing: 'Publishing results',
+    completed: 'Results published',
+    failed: 'Run failed',
+  };
+  return map[stage] || stage || 'Stage';
+}
+
+function stageCode(stage, integrityPassed) {
+  if (stage === 'failed') return 'FAILED';
+  if (stage === 'integrity_passed') return 'SYNC OK';
+  if (stage === 'completed') return 'PUBLISHED';
+  if (stage === 'tracker_progress') return 'RUNNING';
+  if (integrityPassed && stage === 'integrity_passed') return 'SYNC OK';
+  return 'COMPLETE';
 }
 
 function computeCourtshipStats(eventList, reviews) {
@@ -54,7 +132,7 @@ function computeCourtshipStats(eventList, reviews) {
 }
 
 function eventTypeLabel(type) {
-  if (type === 'courtship_bout') return 'Courtship';
+  if (type === 'courtship_bout') return 'Courtship bout';
   if (type === 'low_confidence_segment') return 'Low confidence';
   return type;
 }
@@ -96,6 +174,85 @@ function triggerPdfReport() {
   window.print();
 }
 
+function RunLogPanel({ runProvenance, trackingValidity }) {
+  if (!runProvenance) return null;
+  const integrity = runProvenance.frameIntegrity || runProvenance.integrity;
+  const validity = trackingValidity || runProvenance.trackingValidity;
+  const stages = Array.isArray(runProvenance.stageLog) ? runProvenance.stageLog : [];
+  const integrityPassed = integrity?.passed === true || integrity?.syncOk === true;
+
+  return (
+    <section className="flyt-record" id="record" aria-labelledby="record-title">
+      <div className="flyt-section-head">
+        <h2 className="flyt-h2" id="record-title">Run record</h2>
+        <span className="flyt-muted flyt-mono" title={runProvenance.runId}>
+          {shortRunId(runProvenance.runId)}
+        </span>
+      </div>
+
+      <dl className="flyt-record-meta">
+        <div>
+          <dt>File</dt>
+          <dd>{runProvenance.filename || 'n/a'}</dd>
+        </div>
+        <div>
+          <dt>Completed</dt>
+          <dd>{formatRunDate(runProvenance.timestamp || runProvenance.endTime)}</dd>
+        </div>
+        <div>
+          <dt>Duration</dt>
+          <dd>{formatDurationMs(runProvenance.durationMs)}</dd>
+        </div>
+        <div>
+          <dt>Frame integrity</dt>
+          <dd>{integrity ? (integrityPassed ? 'passed' : 'not passed') : 'not available'}</dd>
+        </div>
+        {integrity && (
+          <div style={{ gridColumn: '1 / -1' }}>
+            <dt>Frame counts</dt>
+            <dd>
+              input {formatCount(integrity.inputFrames)} · tracker {formatCount(integrity.trackerFrames)} · csv {formatCount(integrity.csvRows)} · raw {formatCount(integrity.rawVideoFrames)} · final {formatCount(integrity.finalVideoFrames)}
+            </dd>
+          </div>
+        )}
+        <div style={{ gridColumn: '1 / -1' }}>
+          <dt>Tracking validity</dt>
+          <dd>
+            {validity?.available
+              ? `${formatCount(validity.validFrames)} / ${formatCount(validity.totalFrames)} measured two-fly frames (${validity.percent}%)`
+              : 'not available'}
+          </dd>
+        </div>
+      </dl>
+      <p className="flyt-muted" style={{ margin: '0 0 12px', fontSize: 11 }}>
+        Tracking validity is the share of frames with two separate fly observations. It is not an accuracy score.
+      </p>
+
+      {stages.length > 0 ? (
+        stages.map((entry, index) => (
+          <div className="flyt-record-row" key={`${entry.t}-${entry.stage}-${index}`}>
+            <time dateTime={entry.t}>{formatStageTime(entry.t)}</time>
+            <div>
+              <strong>{stageLabel(entry.stage)}</strong>
+              <span>{entry.message || entry.stage}</span>
+            </div>
+            <code>{stageCode(entry.stage, integrityPassed)}</code>
+          </div>
+        ))
+      ) : (
+        <div className="flyt-record-row">
+          <time>{formatStageTime(runProvenance.timestamp)}</time>
+          <div>
+            <strong>Published run</strong>
+            <span>Stage log not stored for this record</span>
+          </div>
+          <code>LOADED</code>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function DashboardView({
   data,
   stats,
@@ -108,6 +265,9 @@ function DashboardView({
   totalFrames,
   activeEventId,
   isHistoricRun,
+  runProvenance,
+  videoAvailable,
+  trackingValidity,
   onSeekEvent,
   onVerdict,
 }) {
@@ -117,14 +277,30 @@ function DashboardView({
   const [currentFrame, setCurrentFrame] = useState(0);
   const [showLowConfidence, setShowLowConfidence] = useState(false);
 
+  if (!runProvenance?.runId) {
+    return (
+      <div className="flyt-empty flyt-card">
+        <h3 className="flyt-serif">No tracking run loaded</h3>
+        <p>
+          Upload a video under <strong>New run</strong>, or open a prior dataset from <strong>History</strong>.
+        </p>
+      </div>
+    );
+  }
+
   const maxFrame = totalFrames > 0 ? totalFrames - 1 : 0;
+  const fps = runFps > 0 ? runFps : 30;
   const visibleEvents = showLowConfidence
     ? events
     : events.filter((e) => e.type !== 'low_confidence_segment');
+  const pendingCount = visibleEvents.filter((e) => !reviewsByEventId[e.id]?.verdict).length;
+  const validity = trackingValidity || runProvenance.trackingValidity;
+  const integrity = runProvenance.frameIntegrity || runProvenance.integrity;
+  const integrityPassed = integrity?.passed === true || integrity?.syncOk === true;
+  const frameTotal = totalFrames || data.length || 0;
 
   const handleVideoTimeUpdate = () => {
     const video = videoRef.current;
-    const fps = runFps > 0 ? runFps : 30;
     if (video) setCurrentFrame(Math.round(video.currentTime * fps));
     if (!video || !events.length) {
       setPlayingEventId(null);
@@ -138,7 +314,6 @@ function DashboardView({
   };
 
   const seekToFrame = (frame) => {
-    const fps = runFps > 0 ? runFps : 30;
     if (videoRef.current) {
       videoRef.current.currentTime = frame / fps;
       videoRef.current.play().catch(() => {});
@@ -164,289 +339,296 @@ function DashboardView({
   };
 
   const getVerdict = (eventId) => reviewsByEventId[eventId]?.verdict ?? 'pending';
+  const activeReviewEvent = visibleEvents.find((e) => e.id === activeEventId)
+    || visibleEvents.find((e) => e.id === playingEventId)
+    || null;
 
   return (
-    <div className="flex flex-col gap-8 animate-in fade-in duration-300 pb-12">
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h2 className="text-3xl font-bold text-zinc-900 dark:text-white tracking-tight">Run Analytics</h2>
-          <p className="text-zinc-500 text-sm mt-1">
-            {runTimestamp ? (
-              <>Run from <span className="font-mono text-zinc-800 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 px-1.5 py-0.5 rounded ml-1 bg-zinc-50 dark:bg-zinc-900/50">{formatRunDate(runTimestamp)}</span></>
-            ) : (
-              'Upload and track a video to see results here.'
-            )}
-          </p>
+    <div className="flyt-dash">
+      <div className="flyt-dash-main">
+        <div className="flyt-title-row">
+          <div>
+            <div className="flyt-eyeline">
+              {runProvenance.filename || 'unknown file'}
+              {' · '}
+              <span title={runProvenance.runId}>{shortRunId(runProvenance.runId)}</span>
+              {isHistoricRun ? ' · historic' : ''}
+            </div>
+            <h1 className="flyt-h1">Two-fly courtship assay</h1>
+            <p className="flyt-lead">
+              Completed tracking record with measured trajectories, review candidates, and published outputs.
+              {' '}
+              {formatRunDate(runTimestamp || runProvenance.timestamp)}.
+            </p>
+          </div>
+          <span className={`flyt-status ${integrityPassed ? '' : 'muted'}`}>
+            {integrity ? (integrityPassed ? 'Integrity passed' : 'Integrity incomplete') : 'No integrity metadata'}
+          </span>
         </div>
-        <div className="flex gap-3">
-           <button
-             type="button"
-             disabled={data.length === 0}
-             onClick={() => exportPrismCsv(data, runFps)}
-             className="no-print flex items-center gap-2 px-4 py-2 bg-white dark:bg-[#000000] border border-zinc-200 dark:border-zinc-800 rounded-sm text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-white transition-colors shadow-sm dark:shadow-none disabled:opacity-40 disabled:cursor-not-allowed">
-              <DownloadCloud size={14}/> Download CSV (Prism)
-           </button>
-           <button
-             type="button"
-             onClick={triggerPdfReport}
-             className="no-print flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-white text-white dark:text-black rounded-sm text-xs font-bold hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors shadow-sm dark:shadow-none">
-              <FileText size={14}/> Export PDF Report
-           </button>
-        </div>
-      </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Left Column (Video & Stats) */}
-        <div className="lg:col-span-1 flex flex-col gap-6">
-          
-          <div className="no-print bg-white dark:bg-[#000000] border border-zinc-200 dark:border-zinc-800 rounded-sm overflow-hidden shadow-sm dark:shadow-none">
-            <div className="p-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/50 dark:bg-[#050505]">
-              <h3 className="font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-2 text-[10px] uppercase tracking-widest">
-                <Clock size={12} className="text-zinc-400"/>
-                Tracking Feed
-              </h3>
-              {!isHistoricRun && (
-                <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-bold text-zinc-900 dark:text-white">
-                  <span className="w-1.5 h-1.5 rounded-full bg-zinc-900 dark:bg-white animate-pulse"></span>
-                  LIVE
-                </span>
+        <dl className="flyt-summary">
+          <div>
+            <dt>Frames</dt>
+            <dd>{formatCount(frameTotal)}</dd>
+            <small>{fps} frames per second</small>
+          </div>
+          <div>
+            <dt>Valid tracking</dt>
+            <dd>{validity?.available ? `${validity.percent}%` : 'n/a'}</dd>
+            <small>
+              {validity?.available
+                ? `${formatCount(validity.validFrames)} two-fly frames`
+                : 'Metadata not available'}
+            </small>
+          </div>
+          <div>
+            <dt>Avg proximity</dt>
+            <dd>{Number.isFinite(stats.avgProximity) ? stats.avgProximity.toFixed(1) : 'n/a'} px</dd>
+            <small>Invalid frames excluded</small>
+          </div>
+          <div>
+            <dt>Detected bouts</dt>
+            <dd>{formatCount(stats.courtshipDetected)}</dd>
+            <small>{formatCount(stats.courtshipVerified)} verified · sleep proxy {formatCount(stats.sleepTime)}s</small>
+          </div>
+        </dl>
+
+        <section aria-labelledby="observation-title">
+          <div className="flyt-section-head">
+            <h2 className="flyt-h2" id="observation-title">Observation</h2>
+            <a className="flyt-section-link" href="#record">View run record</a>
+          </div>
+          <div className="flyt-video-card no-print">
+            <div className="flyt-video-frame">
+              {isHistoricRun ? (
+                <div className="flyt-video-placeholder">
+                  <p>Video preview not available for historic runs.</p>
+                  <p>CSV and events were archived; the annotated video was not.</p>
+                </div>
+              ) : videoAvailable && runProvenance?.runId ? (
+                <video
+                  ref={videoRef}
+                  key={`${runProvenance.runId}-${mediaCacheBust}`}
+                  controls
+                  preload="metadata"
+                  onTimeUpdate={handleVideoTimeUpdate}
+                  src={`/tracked.mp4?t=${mediaCacheBust}`}
+                />
+              ) : (
+                <div className="flyt-video-placeholder">
+                  <p>No validated current-run video.</p>
+                  <p>Complete a tracking run to load the annotated feed for that run ID.</p>
+                </div>
               )}
             </div>
-            {isHistoricRun ? (
-              <div className="w-full aspect-square bg-zinc-900 flex flex-col items-center justify-center text-center p-6 text-xs text-zinc-400">
-                <p>Video preview not available</p>
-                <p className="mt-1">Only data + events were archived for historic runs.</p>
-              </div>
-            ) : (
-              <video
-                ref={videoRef}
-                controls
-                onTimeUpdate={handleVideoTimeUpdate}
-                className="w-full object-cover bg-black aspect-square"
-                src={`/tracked.mp4?t=${mediaCacheBust}`}
+            <div className="flyt-video-caption">
+              <span>Annotated tracking video. Trajectories remain linked to frame measurements.</span>
+              <code className="mono">
+                Frame {currentFrame} / {maxFrame} · {fps} fps · {formatClock(currentFrame / fps)}
+              </code>
+            </div>
+            <div className="flyt-frame-controls no-print">
+              <label htmlFor="jump-frame-input">Frame</label>
+              <input
+                id="jump-frame-input"
+                className="flyt-input mono"
+                type="number"
+                min={0}
+                max={maxFrame}
+                value={jumpFrameInput}
+                onChange={(e) => setJumpFrameInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleJumpToFrame(e); }}
+                placeholder={`0-${maxFrame}`}
               />
-            )}
-            <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-[#050505] flex flex-col gap-2">
-              <div className="flex items-center gap-2 flex-wrap">
-                <label htmlFor="jump-frame-input" className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 shrink-0">
-                  Frame
-                </label>
-                <input
-                  id="jump-frame-input"
-                  type="number"
-                  min={0}
-                  max={maxFrame}
-                  value={jumpFrameInput}
-                  onChange={(e) => setJumpFrameInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleJumpToFrame(e); }}
-                  placeholder={`0–${maxFrame}`}
-                  className="w-24 px-2 py-1.5 text-xs font-mono bg-white dark:bg-black border border-zinc-200 dark:border-zinc-700 rounded-sm text-zinc-900 dark:text-white outline-none focus:border-zinc-400 dark:focus:border-zinc-500"
-                />
-                <button
-                  type="button"
-                  onClick={handleJumpToFrame}
-                  className="px-3 py-1.5 text-xs font-semibold bg-zinc-900 dark:bg-white text-white dark:text-black rounded-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
-                >
-                  Jump to frame
-                </button>
-              </div>
-              <p className="text-[10px] text-zinc-400 font-mono">
-                Current: {currentFrame} · {runFps > 0 ? runFps : 30} fps
-              </p>
+              <button type="button" className="flyt-btn flyt-btn-dark" onClick={handleJumpToFrame}>
+                Jump to frame
+              </button>
             </div>
           </div>
+        </section>
 
-          <div className="bg-white dark:bg-[#000000] border border-zinc-200 dark:border-zinc-800 p-5 rounded-sm shadow-sm dark:shadow-none flex flex-col justify-between">
-            <p className="text-[10px] text-zinc-500 font-bold tracking-widest uppercase mb-4">Courtship Bouts</p>
-            <p className="text-3xl font-semibold text-zinc-900 dark:text-white tracking-tight">
-              {stats.courtshipVerified}{' '}
-              <span className="text-lg font-normal text-zinc-500">verified</span>
-            </p>
-            <p className="text-xs text-zinc-400 mt-1">
-              {stats.courtshipDetected} detected (human review)
-            </p>
-          </div>
-          
-          <div className="bg-white dark:bg-[#000000] border border-zinc-200 dark:border-zinc-800 p-5 rounded-sm shadow-sm dark:shadow-none flex flex-col justify-between">
-            <p className="text-[10px] text-zinc-500 font-bold tracking-widest uppercase mb-4">Total Sleep Time</p>
-            <p className="text-3xl font-semibold text-zinc-900 dark:text-white tracking-tight">
-               {stats.sleepTime} <span className="text-xs font-normal text-zinc-400">sec</span>
-            </p>
-            <p className="text-[9px] text-zinc-500 mt-1">≈ low activity &gt;5s (ad-hoc)</p>
-          </div>
+        <div className="flyt-charts">
+          <section className="flyt-card flyt-chart" aria-labelledby="velocity-title">
+            <h3 className="flyt-h3" id="velocity-title">Velocity over time</h3>
+            <p>Pixels per second for both tracked subjects</p>
+            <div className="flyt-chart-body">
+              <ResponsiveContainer width="100%" height={180}>
+                <LineChart data={data} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
+                  <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="0" vertical={false} />
+                  <XAxis dataKey="frame" tick={{ fill: CHART_COLORS.tick, fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fill: CHART_COLORS.tick, fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Line type="monotone" dot={false} dataKey="fly1_speed_pxsec" name="Fly 1" stroke={CHART_COLORS.fly1} strokeWidth={1.8} />
+                  <Line type="monotone" dot={false} dataKey="fly2_speed_pxsec" name="Fly 2" stroke={CHART_COLORS.fly2} strokeWidth={1.6} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
 
+          <section className="flyt-validity" aria-labelledby="validity-title">
+            <div>
+              <h3 id="validity-title">Measured tracking validity</h3>
+              <p>
+                Share of frames with two separate fly observations. This is a measurement condition, not an accuracy score.
+              </p>
+            </div>
+            <div className="flyt-validity-number">
+              {validity?.available ? `${validity.percent}%` : 'n/a'}
+              <small>
+                {validity?.available
+                  ? `${formatCount(validity.validFrames)} of ${formatCount(validity.totalFrames)} frames`
+                  : 'Not available for this dataset'}
+              </small>
+            </div>
+          </section>
+
+          <section className="flyt-card flyt-chart" aria-labelledby="prox-title">
+            <h3 className="flyt-h3" id="prox-title">Inter-fly proximity</h3>
+            <p>Centroid distance (px). Core CSV values shown; averages exclude invalid frames.</p>
+            <div className="flyt-chart-body">
+              <ResponsiveContainer width="100%" height={180}>
+                <AreaChart data={data} margin={{ top: 5, right: 8, left: -12, bottom: 0 }}>
+                  <CartesianGrid stroke={CHART_COLORS.grid} vertical={false} />
+                  <XAxis dataKey="frame" tick={{ fill: CHART_COLORS.tick, fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fill: CHART_COLORS.tick, fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Area type="step" dot={false} dataKey="proximity_distance" name="Proximity" stroke={CHART_COLORS.prox} strokeWidth={1.5} fill={CHART_COLORS.prox} fillOpacity={0.08} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          <section className="flyt-card flyt-chart" aria-labelledby="heat-title">
+            <h3 className="flyt-h3" id="heat-title">Spatial density</h3>
+            <p>Fly 1 XY sample (1 in 5 frames)</p>
+            <div className="flyt-chart-body">
+              <ResponsiveContainer width="100%" height={180}>
+                <ScatterChart margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                  <XAxis type="number" dataKey="x" name="X" tick={{ fill: CHART_COLORS.tick, fontSize: 10 }} domain={['dataMin', 'dataMax']} />
+                  <YAxis type="number" dataKey="y" name="Y" tick={{ fill: CHART_COLORS.tick, fontSize: 10 }} domain={['dataMin', 'dataMax']} reversed />
+                  <ZAxis type="number" range={[12, 18]} />
+                  <Scatter data={heatmapData} fill={CHART_COLORS.fly1} fillOpacity={0.18} />
+                </ScatterChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
         </div>
 
-        {/* Right Column (Charts) */}
-        <div className="lg:col-span-3 grid grid-cols-2 gap-6">
-          
-          <div className="col-span-2 md:col-span-1 bg-white dark:bg-[#000000] border border-zinc-200 dark:border-zinc-800 rounded-sm p-6 h-[260px] flex flex-col shadow-sm dark:shadow-none relative overflow-hidden">
-             <h3 className="text-[10px] font-bold text-zinc-600 dark:text-zinc-400 mb-2 uppercase tracking-widest z-10 w-full">
-                Spatial Heatmap
-             </h3>
-             <p className="text-[10px] text-zinc-500 mb-2 z-10 w-full">Arena density (XY coords)</p>
-             <div className="flex-1 w-full absolute inset-0 pt-16 px-4 pb-4">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ScatterChart margin={{ top: 0, right: 0, left: -30, bottom: 0 }}>
-                    <XAxis type="number" dataKey="x" name="X" opacity={0} domain={['dataMin', 'dataMax']} />
-                    <YAxis type="number" dataKey="y" name="Y" opacity={0} domain={['dataMin', 'dataMax']} reversed={true} />
-                    <ZAxis type="number" range={[10, 20]} />
-                    <Scatter data={heatmapData} fill="currentColor" className="text-zinc-900 dark:text-zinc-500" fillOpacity={0.06} />
-                  </ScatterChart>
-                </ResponsiveContainer>
-             </div>
-          </div>
-
-          <div className="col-span-2 md:col-span-1 bg-white dark:bg-[#000000] border border-zinc-200 dark:border-zinc-800 rounded-sm p-6 h-[260px] flex flex-col shadow-sm dark:shadow-none">
-             <h3 className="text-[10px] font-bold text-zinc-600 dark:text-zinc-400 mb-6 uppercase tracking-widest">
-                Velocity (px/sec)
-             </h3>
-             <div className="flex-1 w-full relative">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={data} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-zinc-200 dark:text-zinc-800/40" vertical={false} />
-                    <XAxis dataKey="frame" stroke="currentColor" className="text-zinc-300 dark:text-zinc-700" tick={{fill: '#a1a1aa', fontSize: 10}} tickLine={false} axisLine={false} />
-                    <YAxis stroke="currentColor" className="text-zinc-300 dark:text-zinc-700" tick={{fill: '#a1a1aa', fontSize: 10}} tickLine={false} axisLine={false} />
-                    <Tooltip cursor={{stroke: '#a1a1aa', strokeWidth: 1, strokeDasharray: '3 3'}} content={<CustomTooltip />} />
-                    <Line type="monotone" dot={false} dataKey="fly1_speed_pxsec" name="Fly 1 Velocity" stroke="currentColor" className="text-zinc-900 dark:text-zinc-300" strokeWidth={1.5} />
-                    <Line type="monotone" dot={false} dataKey="fly2_speed_pxsec" name="Fly 2 Velocity" stroke="currentColor" className="text-zinc-400 dark:text-zinc-600" strokeWidth={1} strokeDasharray="3 3"/>
-                  </LineChart>
-                </ResponsiveContainer>
-             </div>
-          </div>
-
-          <div className="col-span-2 bg-white dark:bg-[#000000] border border-zinc-200 dark:border-zinc-800 rounded-sm p-6 h-[260px] flex flex-col shadow-sm dark:shadow-none">
-             <h3 className="text-[10px] font-bold text-zinc-600 dark:text-zinc-400 mb-6 uppercase tracking-widest flex items-center justify-between">
-                Inter-Fly Proximity Distance
-             </h3>
-             <div className="flex-1 w-full relative">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={data} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorProx" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="currentColor" stopOpacity={0.15}/>
-                        <stop offset="95%" stopColor="currentColor" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-zinc-200 dark:text-zinc-800/40" vertical={false} />
-                    <XAxis dataKey="frame" stroke="currentColor" className="text-zinc-300 dark:text-zinc-700" tick={{fill: '#a1a1aa', fontSize: 10}} tickLine={false} axisLine={false} />
-                    <YAxis stroke="currentColor" className="text-zinc-300 dark:text-zinc-700" tick={{fill: '#a1a1aa', fontSize: 10}} tickLine={false} axisLine={false} />
-                    <Tooltip cursor={{stroke: '#a1a1aa', strokeWidth: 1, strokeDasharray: '3 3'}} content={<CustomTooltip />} />
-                    <Area type="step" dot={false} dataKey="proximity_distance" stroke="currentColor" className="text-zinc-900 dark:text-zinc-300" strokeWidth={1.5} fillOpacity={1} fill="url(#colorProx)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-             </div>
-          </div>
-          
-        </div>
+        <RunLogPanel runProvenance={runProvenance} trackingValidity={trackingValidity} />
       </div>
 
-      <div className="bg-white dark:bg-[#000000] border border-zinc-200 dark:border-zinc-800 rounded-sm shadow-sm dark:shadow-none overflow-hidden">
-        <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-[#050505] flex items-center justify-between gap-3 flex-wrap">
-          <h3 className="font-semibold text-zinc-700 dark:text-zinc-300 text-[10px] uppercase tracking-widest">
-            Event Verification
-          </h3>
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-1.5 text-[10px] text-zinc-500 uppercase tracking-widest cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={showLowConfidence}
-                onChange={(e) => setShowLowConfidence(e.target.checked)}
-                className="rounded border-zinc-300 dark:border-zinc-600"
-              />
-              Show low confidence
-            </label>
-            <span className="text-[10px] text-zinc-500 uppercase tracking-widest">
-              {visibleEvents.length} shown
-            </span>
+      <aside className="flyt-aside no-print" aria-labelledby="review-title">
+        <div className="flyt-aside-inner">
+          <div className="flyt-aside-title">
+            <h2 className="flyt-h2-serif" id="review-title">Review notes</h2>
+            <span className="flyt-count" aria-label={`${pendingCount} pending`}>{pendingCount}</span>
           </div>
+          <p className="flyt-aside-copy">
+            Detected candidates are listed for manual review. Researcher verdicts are stored separately from tracker output.
+          </p>
+          <label className="flyt-filter">
+            <input
+              type="checkbox"
+              checked={showLowConfidence}
+              onChange={(e) => setShowLowConfidence(e.target.checked)}
+            />
+            Show low-confidence segments
+          </label>
+
+          {visibleEvents.length === 0 ? (
+            <p className="flyt-muted">No review candidates for this run.</p>
+          ) : (
+            <div className="flyt-event-list" role="list">
+              {visibleEvents.map((event) => {
+                const verdict = getVerdict(event.id);
+                const isActive = playingEventId === event.id || activeEventId === event.id;
+                return (
+                  <button
+                    key={event.id}
+                    type="button"
+                    role="listitem"
+                    className={`flyt-event ${isActive ? 'active' : ''}`}
+                    onClick={() => handleEventClick(event)}
+                  >
+                    <span className="flyt-event-top">
+                      <span className="flyt-event-name">{eventTypeLabel(event.type)}</span>
+                      <time>{formatClock(event.start_time_sec)}</time>
+                    </span>
+                    <small>
+                      Frames {event.start_frame}-{event.end_frame}
+                      {' · '}
+                      {Number(event.duration_sec).toFixed(1)}s
+                      {event.mean_proximity_px != null ? ` · mean prox ${event.mean_proximity_px}px` : ''}
+                    </small>
+                    <span className="flyt-event-tags">
+                      <span className="flyt-badge detected">detected</span>
+                      <span className={`flyt-badge ${verdict}`}>{verdict}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="flyt-review-buttons">
+            <button
+              type="button"
+              className={`flyt-btn flyt-btn-reject ${activeReviewEvent && getVerdict(activeReviewEvent.id) === 'rejected' ? 'is-active' : ''}`}
+              disabled={!activeReviewEvent}
+              aria-pressed={activeReviewEvent ? getVerdict(activeReviewEvent.id) === 'rejected' : false}
+              onClick={(e) => activeReviewEvent && handleVerdictClick(e, activeReviewEvent.id, 'rejected')}
+            >
+              <X size={14} /> Reject
+            </button>
+            <button
+              type="button"
+              className={`flyt-btn flyt-btn-confirm ${activeReviewEvent && getVerdict(activeReviewEvent.id) === 'confirmed' ? 'is-active' : ''}`}
+              disabled={!activeReviewEvent}
+              aria-pressed={activeReviewEvent ? getVerdict(activeReviewEvent.id) === 'confirmed' : false}
+              onClick={(e) => activeReviewEvent && handleVerdictClick(e, activeReviewEvent.id, 'confirmed')}
+            >
+              <Check size={14} /> Confirm
+            </button>
+          </div>
+          {activeReviewEvent && (
+            <p className="flyt-muted flyt-mono" style={{ margin: 0, fontSize: 10 }}>
+              Selected: {activeReviewEvent.id}
+            </p>
+          )}
+
+          <section className="flyt-card flyt-reference">
+            <img src="/validation-loop.svg" alt="Detection and verification remain separate steps" />
+            <div>
+              <h3>Detection stays separate from evidence</h3>
+              <p>Researcher decisions are stored without rewriting the raw tracker output.</p>
+            </div>
+          </section>
         </div>
-        {visibleEvents.length === 0 ? (
-          <div className="p-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
-            No events to verify. Upload and track a video to generate suspected courtship bouts.
-          </div>
-        ) : (
-          <div className="divide-y divide-zinc-200 dark:divide-zinc-800 max-h-[320px] overflow-y-auto">
-            {visibleEvents.map((event) => {
-              const verdict = getVerdict(event.id);
-              const isHighlighted = playingEventId === event.id || activeEventId === event.id;
-              return (
-                <div
-                  key={event.id}
-                  onClick={() => handleEventClick(event)}
-                  className={`p-4 cursor-pointer transition-colors ${
-                    isHighlighted
-                      ? 'bg-zinc-100 dark:bg-zinc-900/80'
-                      : 'hover:bg-zinc-50 dark:hover:bg-zinc-900/40'
-                  }`}
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                        <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-sm border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300">
-                          {eventTypeLabel(event.type)}
-                        </span>
-                        <span
-                          className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-sm ${
-                            verdict === 'confirmed'
-                              ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/50'
-                              : verdict === 'rejected'
-                                ? 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900/50'
-                                : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-500 border border-zinc-200 dark:border-zinc-700'
-                          }`}
-                        >
-                          {verdict}
-                        </span>
-                        <span className="font-mono text-[10px] text-zinc-400">{event.id}</span>
-                      </div>
-                      <p className="text-sm font-medium text-zinc-900 dark:text-white">
-                        {formatTimeRange(event.start_time_sec, event.end_time_sec)}
-                        <span className="text-zinc-400 font-normal ml-2">
-                          ({event.duration_sec.toFixed(1)}s)
-                        </span>
-                      </p>
-                      <p className="text-[11px] text-zinc-500 mt-1">
-                        Frames {event.start_frame}–{event.end_frame} · mean prox {event.mean_proximity_px}px
-                      </p>
-                    </div>
-                    <div className="flex gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        onClick={(e) => handleVerdictClick(e, event.id, 'confirmed')}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-sm border transition-colors ${
-                          verdict === 'confirmed'
-                            ? 'bg-emerald-600 text-white border-emerald-600'
-                            : 'bg-white dark:bg-black border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:border-emerald-500'
-                        }`}
-                      >
-                        <Check size={14} /> Confirm
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => handleVerdictClick(e, event.id, 'rejected')}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-sm border transition-colors ${
-                          verdict === 'rejected'
-                            ? 'bg-red-600 text-white border-red-600'
-                            : 'bg-white dark:bg-black border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:border-red-500'
-                        }`}
-                      >
-                        <X size={14} /> Reject
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      </aside>
     </div>
   );
 }
 
-function UploadView({ uploadJob, onFileSelect }) {
+function UploadView({ uploadJob, onFileSelect, onCancel }) {
   const fileInputRef = useRef(null);
   const isProcessing = uploadJob.active;
+  const isCancelling = Boolean(uploadJob.cancelling);
+  const total = uploadJob.totalFrames;
+  const frames = uploadJob.framesProcessed || 0;
+  const hasTotal = Number.isFinite(total) && total > 0;
+  const pct = hasTotal ? Math.min(100, Math.round((frames / total) * 100)) : null;
+  const stages = Array.isArray(uploadJob.stageLog) ? uploadJob.stageLog : [];
+  const elapsedMs = Number.isFinite(uploadJob.elapsedMs) ? uploadJob.elapsedMs : null;
+  const fpsRate = elapsedMs > 1000 && frames > 0
+    ? Math.round((frames / (elapsedMs / 1000)) * 10) / 10
+    : null;
+  const etaMs = hasTotal && fpsRate > 0 && frames < total
+    ? Math.round(((total - frames) / fpsRate) * 1000)
+    : null;
+  const isTracking = hasTotal && frames > 0 && frames < total && !isCancelling;
+  const ringStyle = pct !== null
+    ? { '--flyt-ring-pct': String(pct) }
+    : undefined;
 
   const handleFileChange = (e) => {
     if (!e.target.files || e.target.files.length === 0) return;
@@ -455,41 +637,182 @@ function UploadView({ uploadJob, onFileSelect }) {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center h-full animate-in fade-in duration-300">
+    <div className="flyt-page compact" style={{ paddingTop: 8 }}>
+      <div className="flyt-title-row">
+        <div>
+          <div className="flyt-eyeline">local analysis</div>
+          <h1 className="flyt-h1">New run</h1>
+          <p className="flyt-lead">
+            Upload a courtship video. Tracker settings from the Settings panel apply to the next upload.
+          </p>
+        </div>
+      </div>
+
       {isProcessing ? (
-        <div className="flex flex-col items-center justify-center gap-5 max-w-sm">
-          <div className="w-6 h-6 rounded-full border-2 border-zinc-900 dark:border-white border-r-transparent animate-spin" />
-          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 tracking-tight text-center">
+        <div className="flyt-panel flyt-loader-card" style={{ maxWidth: 520, margin: '0 auto' }}>
+          <div className="flyt-loader-visual" aria-hidden="true">
+            {hasTotal && !isCancelling ? (
+              <div className={`flyt-ring ${isTracking ? 'is-live' : ''}`} style={ringStyle}>
+                <div className="flyt-ring-inner">
+                  <span className="flyt-ring-value flyt-mono">{pct ?? 0}</span>
+                  <span className="flyt-ring-unit">%</span>
+                </div>
+              </div>
+            ) : (
+              <div className="flyt-orbit" role="presentation">
+                <span className="flyt-orbit-core" />
+                <span className="flyt-orbit-dot" />
+              </div>
+            )}
+          </div>
+
+          <p className="flyt-loader-title">
             {uploadJob.progress || 'Initializing...'}
           </p>
-          {uploadJob.framesProcessed > 0 && (
-            <div className="flex items-center gap-4 text-[10px] uppercase tracking-widest text-zinc-500">
-              <span className="font-mono font-bold text-zinc-900 dark:text-white text-xs">{uploadJob.framesProcessed}</span>
-              frames tracked
+          {uploadJob.runId && (
+            <p className="flyt-muted flyt-mono flyt-loader-meta" title={uploadJob.runId}>
+              {shortRunId(uploadJob.runId)}
+              {uploadJob.uploadedFilename ? ` · ${uploadJob.uploadedFilename}` : ''}
+            </p>
+          )}
+
+          {hasTotal && !isCancelling ? (
+            <div className="flyt-loader-meter-block">
+              <div className="flyt-loader-stats">
+                <span className="flyt-mono" style={{ fontWeight: 650 }}>
+                  {frames.toLocaleString()} / {total.toLocaleString()} frames
+                </span>
+                <span className="flyt-mono flyt-muted">{pct}%</span>
+              </div>
+              <div
+                className={`flyt-meter flyt-meter-lg ${frames === 0 ? 'is-indeterminate' : ''}`}
+                role="progressbar"
+                aria-valuenow={pct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Tracking progress"
+              >
+                <span style={{ width: frames === 0 ? '28%' : `${pct}%` }} />
+              </div>
             </div>
+          ) : (
+            <div className="flyt-loader-meter-block">
+              <div className="flyt-meter flyt-meter-lg is-indeterminate" role="progressbar" aria-label={isCancelling ? 'Cancelling run' : 'Preparing tracker'}>
+                <span />
+              </div>
+              <p className="flyt-muted" style={{ margin: '10px 0 0', fontSize: 12, textAlign: 'center' }}>
+                {isCancelling
+                  ? 'Stopping tracker processes and clearing the run workspace…'
+                  : 'Counting frames and starting the tracker…'}
+              </p>
+            </div>
+          )}
+
+          {!isCancelling && (
+            <div className="flyt-loader-kpis">
+              {elapsedMs !== null && (
+                <div>
+                  <span className="flyt-kpi-label">Elapsed</span>
+                  <span className="flyt-mono">{formatDurationMs(elapsedMs)}</span>
+                </div>
+              )}
+              {fpsRate !== null && (
+                <div>
+                  <span className="flyt-kpi-label">Rate</span>
+                  <span className="flyt-mono">{fpsRate} fps</span>
+                </div>
+              )}
+              {etaMs !== null && (
+                <div>
+                  <span className="flyt-kpi-label">ETA</span>
+                  <span className="flyt-mono">~{formatDurationMs(etaMs)}</span>
+                </div>
+              )}
+              {!hasTotal && frames === 0 && (
+                <div>
+                  <span className="flyt-kpi-label">Status</span>
+                  <span>Preparing</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flyt-loader-actions">
+            <button
+              type="button"
+              className="flyt-btn flyt-btn-cancel"
+              onClick={onCancel}
+              disabled={isCancelling || !onCancel}
+              aria-busy={isCancelling}
+            >
+              <X size={14} />
+              {isCancelling ? 'Cancelling…' : 'Cancel run'}
+            </button>
+          </div>
+
+          {stages.length > 0 && (
+            <ul className="flyt-stage-list" style={{ listStyle: 'none', padding: 0, textAlign: 'left', marginTop: 16 }}>
+              {stages.slice(-8).map((entry, index) => (
+                <li key={`${entry.t}-${entry.stage}-${index}`}>
+                  <time>{formatStageTime(entry.t)}</time>
+                  <span>{entry.message || entry.stage}</span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       ) : (
-        <div className="w-full max-w-lg flex flex-col items-center">
-
-            {uploadJob.error && (
-              <div className="w-full mb-6 p-4 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded-sm">
-                <p className="text-xs font-semibold text-red-600 dark:text-red-400">{uploadJob.error}</p>
-              </div>
-            )}
-            
-
-
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              className="bg-zinc-50/50 dark:bg-[#050505]/50 border border-dashed border-zinc-300 dark:border-zinc-800 rounded-sm w-full p-16 flex flex-col items-center justify-center transition-colors shadow-sm dark:shadow-none hover:bg-zinc-50 dark:hover:bg-[#111] cursor-pointer group"
-            >
-              <UploadCloud size={32} className="text-zinc-400 dark:text-zinc-600 mb-4 group-hover:text-zinc-900 dark:group-hover:text-white transition-colors" />
-              <h3 className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 mb-1">Select video file</h3>
-              <p className="text-[11px] text-zinc-500 text-center uppercase tracking-wider">MP4 up to 10GB</p>
-              <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".mp4,.avi,.mov" />
+        <div style={{ maxWidth: 520, margin: '0 auto' }}>
+          {uploadJob.notice && (
+            <div className="flyt-notice" role="status">
+              <p style={{ fontWeight: 650, margin: 0 }}>{uploadJob.notice}</p>
             </div>
-            
+          )}
+          {uploadJob.error && (
+            <div className="flyt-error" role="alert">
+              <p style={{ fontWeight: 650 }}>{uploadJob.error}</p>
+              {uploadJob.resultPublished === false && (
+                <p>
+                  No new result was published. Previous published output (if any) was left intact. Open History to review a prior run.
+                </p>
+              )}
+              {Array.isArray(uploadJob.stageLog) && uploadJob.stageLog.length > 0 && (
+                <ul className="flyt-stage-list" style={{ listStyle: 'none', padding: 0, marginTop: 10, background: 'transparent' }}>
+                  {uploadJob.stageLog.slice(-10).map((entry, index) => (
+                    <li key={`err-${entry.t}-${index}`} className="flyt-mono">
+                      <time>{formatStageTime(entry.t)}</time>
+                      <span>{entry.message || entry.stage}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          <div
+            role="button"
+            tabIndex={0}
+            className="flyt-dropzone"
+            onClick={() => fileInputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                fileInputRef.current?.click();
+              }
+            }}
+          >
+            <UploadCloud size={28} style={{ color: 'var(--faint)' }} />
+            <h3>Select video file</h3>
+            <p>MP4, AVI, or MOV · up to 10 GB</p>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              className="sr-only"
+              style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}
+              accept=".mp4,.avi,.mov"
+            />
+          </div>
         </div>
       )}
     </div>
@@ -497,7 +820,7 @@ function UploadView({ uploadJob, onFileSelect }) {
 }
 
 // Mounted only while open (see App). Fresh mount resets draft from last applied
-// settings — no setState-in-effect sync. Cancel unmounts without onApply.
+// settings. Cancel unmounts without onApply.
 function SettingsModal({ onClose, settings, onApply }) {
   const [draft, setDraft] = React.useState(() => ({ ...settings }));
   const [showAdvanced, setShowAdvanced] = React.useState(false);
@@ -515,61 +838,67 @@ function SettingsModal({ onClose, settings, onApply }) {
   const resetDefaults = () => setDraft({ minArea: 30, maxArea: 0, proximityThreshold: 60, boutMinFrames: 90 });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center animate-in fade-in duration-200 bg-zinc-900/20 dark:bg-[#000000]/80 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white dark:bg-[#000000] border border-zinc-200 dark:border-zinc-800 w-full max-w-sm p-8 rounded-sm shadow-2xl relative" onClick={e => e.stopPropagation()}>
-        <button onClick={onClose} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors">
+    <div className="flyt-modal-backdrop no-print" onClick={onClose} role="presentation">
+      <div
+        className="flyt-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="flyt-btn flyt-btn-ghost"
+          onClick={onClose}
+          aria-label="Close settings"
+          style={{ position: 'absolute', top: 12, right: 12 }}
+        >
           <X size={16} />
         </button>
-        <h2 className="text-xl font-bold text-zinc-900 dark:text-white mb-1">Tracker Settings</h2>
-        <p className="text-[11px] text-zinc-500 mb-6">Applied on the next upload. Defaults match the pitch baseline.</p>
+        <h2 id="settings-title">Tracker settings</h2>
+        <p className="flyt-muted" style={{ margin: '0 0 20px' }}>
+          Applied on the next upload. Defaults match the pitch baseline.
+        </p>
 
-        <div className="space-y-6">
-          <div>
-            <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest block mb-2">Min contour area (px²)</label>
-            <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mb-2">Ignore foreground blobs smaller than this (noise / debris).</p>
-            <input type="number" min={0} value={draft.minArea} onChange={setField('minArea')}
-              className="w-full bg-zinc-50 dark:bg-[#050505] border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-300 text-xs px-3 py-2 rounded-sm outline-none focus:border-zinc-400 dark:focus:border-zinc-500" />
-          </div>
-
-          <div>
-            <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest block mb-2">Proximity threshold (px)</label>
-            <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mb-2">Centroid distance that defines a courtship bout.</p>
-            <input type="number" min={0} value={draft.proximityThreshold} onChange={setField('proximityThreshold')}
-              className="w-full bg-zinc-50 dark:bg-[#050505] border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-300 text-xs px-3 py-2 rounded-sm outline-none focus:border-zinc-400 dark:focus:border-zinc-500" />
-          </div>
-
-          <div>
-            <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest block mb-2">Bout min frames</label>
-            <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mb-2">Consecutive proximity frames required for a bout (~3s at 30fps = 90).</p>
-            <input type="number" min={1} value={draft.boutMinFrames} onChange={setField('boutMinFrames')}
-              className="w-full bg-zinc-50 dark:bg-[#050505] border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-300 text-xs px-3 py-2 rounded-sm outline-none focus:border-zinc-400 dark:focus:border-zinc-500" />
-          </div>
-
-          <button type="button" onClick={() => setShowAdvanced((s) => !s)}
-            className="text-[10px] font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-white uppercase tracking-widest flex items-center gap-1">
-            <ChevronDown size={12} className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
-            Advanced
-          </button>
-
-          {showAdvanced && (
-            <div>
-              <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest block mb-2">Max contour area (px²)</label>
-              <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mb-2">Upper area bound (0 = no limit). Pitch uses 0; raise to ignore the cotton plug.</p>
-              <input type="number" min={0} value={draft.maxArea} onChange={setField('maxArea')}
-                className="w-full bg-zinc-50 dark:bg-[#050505] border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-300 text-xs px-3 py-2 rounded-sm outline-none focus:border-zinc-400 dark:focus:border-zinc-500" />
-            </div>
-          )}
+        <div className="flyt-field">
+          <label htmlFor="set-min-area">Min contour area (px²)</label>
+          <p>Ignore foreground blobs smaller than this (noise / debris).</p>
+          <input id="set-min-area" className="flyt-input" type="number" min={0} value={draft.minArea} onChange={setField('minArea')} />
         </div>
 
-        <div className="mt-8 flex gap-2">
-          <button onClick={resetDefaults}
-            className="px-4 py-2 text-xs font-semibold bg-transparent border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-sm transition-colors">
-            Reset
-          </button>
-          <button onClick={apply}
-            className="flex-1 bg-zinc-900 dark:bg-white text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 px-5 py-2 text-xs font-bold rounded-sm transition-colors shadow-sm dark:shadow-none">
-            Apply Configuration
-          </button>
+        <div className="flyt-field">
+          <label htmlFor="set-prox">Proximity threshold (px)</label>
+          <p>Centroid distance that defines a courtship bout.</p>
+          <input id="set-prox" className="flyt-input" type="number" min={0} value={draft.proximityThreshold} onChange={setField('proximityThreshold')} />
+        </div>
+
+        <div className="flyt-field">
+          <label htmlFor="set-bout">Bout min frames</label>
+          <p>Consecutive proximity frames required for a bout (~3s at 30fps = 90).</p>
+          <input id="set-bout" className="flyt-input" type="number" min={1} value={draft.boutMinFrames} onChange={setField('boutMinFrames')} />
+        </div>
+
+        <button
+          type="button"
+          className="flyt-btn flyt-btn-ghost"
+          onClick={() => setShowAdvanced((s) => !s)}
+          style={{ marginBottom: 12, paddingLeft: 0 }}
+        >
+          <ChevronDown size={12} style={{ transform: showAdvanced ? 'rotate(180deg)' : 'none' }} />
+          Advanced
+        </button>
+
+        {showAdvanced && (
+          <div className="flyt-field">
+            <label htmlFor="set-max-area">Max contour area (px²)</label>
+            <p>Upper area bound (0 = no limit). Pitch uses 0; raise to ignore the cotton plug.</p>
+            <input id="set-max-area" className="flyt-input" type="number" min={0} value={draft.maxArea} onChange={setField('maxArea')} />
+          </div>
+        )}
+
+        <div className="flyt-modal-actions">
+          <button type="button" className="flyt-btn" onClick={resetDefaults}>Reset</button>
+          <button type="button" className="flyt-btn flyt-btn-dark" onClick={apply}>Apply configuration</button>
         </div>
       </div>
     </div>
@@ -593,11 +922,14 @@ function App() {
   const [runFps, setRunFps] = useState(30);
   const [totalFrames, setTotalFrames] = useState(0);
   const [isHistoricRun, setIsHistoricRun] = useState(false);
+  const [runProvenance, setRunProvenance] = useState(null);
+  const [videoAvailable, setVideoAvailable] = useState(false);
+  const [trackingValidity, setTrackingValidity] = useState(null);
   const [activeEventId, setActiveEventId] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [isDark, setIsDark] = useState(true);
+  const [isDark, setIsDark] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  // Tracker settings — defaults match the pitch baseline. Sent to /api/upload
+  // Tracker settings - defaults match the pitch baseline. Sent to /api/upload
   // as multipart fields, validated server-side in buildTrackerArgs.
   const [settings, setSettings] = useState({
     minArea: 30,
@@ -608,31 +940,67 @@ function App() {
   const [history, setHistory] = useState([]);
   const [uploadJob, setUploadJob] = useState({
     active: false,
+    cancelling: false,
     progress: '',
     framesProcessed: 0,
+    totalFrames: null,
     error: null,
+    notice: null,
+    runId: null,
+    uploadedFilename: null,
+    stageLog: [],
+    elapsedMs: null,
+    resultPublished: null,
   });
   const pollRef = useRef(null);
   const loadGenerationRef = useRef(0);
+  const uploadAbortRef = useRef(null);
+  const cancellingRef = useRef(false);
   // Latest fps for loadAll fallback without re-creating the callback each frame update.
   const runFpsRef = useRef(runFps);
   runFpsRef.current = runFps;
+
+  const clearCurrentResultDisplay = useCallback(() => {
+    setData([]);
+    setHeatmapData([]);
+    setEvents([]);
+    setReviewsByEventId({});
+    setRunTimestamp(null);
+    setRunProvenance(null);
+    setVideoAvailable(false);
+    setTrackingValidity(null);
+    setTotalFrames(0);
+    setIsHistoricRun(false);
+    setActiveEventId(null);
+    setStats({
+      avgProximity: 0,
+      maxActivity: 0,
+      sleepTime: 0,
+      courtshipDetected: 0,
+      courtshipVerified: 0,
+    });
+  }, []);
 
   const loadEventsAndVerification = useCallback(async (cacheBust = Date.now(), generation = loadGenerationRef.current, runId = null) => {
     let eventList = [];
     const reviews = {};
     let fps = 30;
     let frames = 0;
+    let metadata = null;
 
     if (!runId) {
       try {
         const metaRes = await fetch(`/run_metadata.json?t=${cacheBust}`, { cache: 'no-store' });
         if (metaRes.ok) {
-          const meta = await metaRes.json();
-          if (meta.timestamp) setRunTimestamp(meta.timestamp);
-          if (meta.fps) fps = meta.fps;
+          metadata = await metaRes.json();
+          if (metadata.fps) fps = metadata.fps;
         }
       } catch { /* metadata optional */ }
+    } else {
+      try {
+        const metaRes = await fetch(`/history/${runId}/run_metadata.json?t=${cacheBust}`, { cache: 'no-store' });
+        if (metaRes.ok) metadata = await metaRes.json();
+      } catch { /* historic metadata optional */ }
     }
 
     try {
@@ -661,7 +1029,7 @@ function App() {
       }
     } catch { /* keep empty reviews */ }
 
-    if (generation !== loadGenerationRef.current) return { fps: 30 };
+    if (generation !== loadGenerationRef.current) return { fps: 30, metadata: null };
 
     if (frames > 0) setTotalFrames(frames);
     setRunFps(fps);
@@ -671,7 +1039,7 @@ function App() {
       const { detected, verified } = computeCourtshipStats(eventList, reviews);
       return { ...prev, courtshipDetected: detected, courtshipVerified: verified };
     });
-    return { fps, frames };
+    return { fps, frames, metadata };
   }, []);
 
   const loadData = useCallback((cacheBust = Date.now(), generation = loadGenerationRef.current, customPath = null, fps = 30) => new Promise((resolve) => {
@@ -753,9 +1121,9 @@ function App() {
         setData(parsedData);
         setHeatmapData(hmData);
         setTotalFrames((prev) => (prev > 0 ? prev : parsedData.length));
-        resolve(parsedData.length);
+        resolve({ rowCount: parsedData.length, trackingValidity: summarizeTrackingValidity(parsedData) });
       },
-      error: () => resolve(0),
+      error: () => resolve({ rowCount: 0, trackingValidity: null }),
     });
   }), []);
 
@@ -789,20 +1157,54 @@ function App() {
   }, []);
 
   // Load a past run's snapshot (data.csv + events.json from public/history/<runId>/)
-  // into the active dashboard. Video for past runs is not snapshotted — clear it
+  // into the active dashboard. Video for past runs is not snapshotted - clear it
   // so the player doesn't show a stale frame.
   const loadHistoricRun = async (run) => {
     const runId = run.runId;
     const generation = ++loadGenerationRef.current;
     const cacheBust = Date.now();
     setMediaCacheBust(cacheBust);
-    setRunTimestamp(run.timestamp || null);
+    setVideoAvailable(false);
     setIsHistoricRun(true);
+    setRunTimestamp(run.timestamp || null);
+    setTrackingValidity(run.trackingValidity || null);
+    setRunProvenance({
+      runId,
+      filename: run.filename || null,
+      timestamp: run.timestamp || null,
+      durationMs: Number.isFinite(run.durationSec) ? run.durationSec * 1000 : null,
+      stageLog: run.stageLog || null,
+      frameIntegrity: run.frameIntegrity || null,
+      trackingValidity: run.trackingValidity || null,
+      startTime: run.startTime || null,
+      endTime: run.endTime || run.timestamp || null,
+    });
     try {
       // Load events first to get accurate fps (avoids stale state) for sleep + pxsec normalization
       const eventResult = await loadEventsAndVerification(cacheBust, generation, runId);
+      if (generation !== loadGenerationRef.current) return;
       const historicFps = (eventResult && eventResult.fps > 0) ? eventResult.fps : 30;
-      await loadData(cacheBust, generation, `/history/${runId}/data.csv`, historicFps);
+      const meta = eventResult?.metadata;
+      if (meta && meta.runId === runId) {
+        setRunProvenance({
+          runId: meta.runId,
+          filename: meta.filename || run.filename || null,
+          timestamp: meta.timestamp || run.timestamp || null,
+          durationMs: meta.durationMs ?? (Number.isFinite(run.durationSec) ? run.durationSec * 1000 : null),
+          stageLog: meta.stageLog || run.stageLog || null,
+          frameIntegrity: meta.frameIntegrity || run.frameIntegrity || null,
+          trackingValidity: meta.trackingValidity || run.trackingValidity || null,
+          startTime: meta.startTime || run.startTime || null,
+          endTime: meta.endTime || meta.timestamp || run.timestamp || null,
+        });
+        if (meta.trackingValidity) setTrackingValidity(meta.trackingValidity);
+        if (meta.timestamp) setRunTimestamp(meta.timestamp);
+      }
+      const dataResult = await loadData(cacheBust, generation, `/history/${runId}/data.csv`, historicFps);
+      if (generation !== loadGenerationRef.current) return;
+      if (!run.trackingValidity && !meta?.trackingValidity && dataResult?.trackingValidity) {
+        setTrackingValidity(dataResult.trackingValidity);
+      }
     } catch (e) {
       console.error('Failed to load historic run:', e);
     }
@@ -820,53 +1222,179 @@ function App() {
     }
   };
 
-  const loadAll = useCallback(async (cacheBust = Date.now()) => {
+  /**
+   * Load the current published bundle only when metadata.runId matches expectedRunId
+   * (when provided). Prevents stale async loads from attaching the wrong run's video.
+   */
+  const loadAll = useCallback(async (cacheBust = Date.now(), expectedRunId = null) => {
     const generation = ++loadGenerationRef.current;
     setMediaCacheBust(cacheBust);
     setIsHistoricRun(false);
+    setVideoAvailable(false);
     // Load events first to get accurate fps for loadData (sleep calc + any legacy pxsec normalization)
     const eventsResult = await loadEventsAndVerification(cacheBust, generation);
+    if (generation !== loadGenerationRef.current) return false;
+    const meta = eventsResult?.metadata || null;
+    if (expectedRunId) {
+      if (!meta?.runId || meta.runId !== expectedRunId) {
+        return false;
+      }
+    }
+    if (!meta?.runId) {
+      // No validated published run - do not present a bare tracked.mp4.
+      setRunProvenance(null);
+      setRunTimestamp(null);
+      setTrackingValidity(null);
+      await loadHistory(cacheBust);
+      return false;
+    }
+
     const currentFps = (eventsResult && eventsResult.fps > 0) ? eventsResult.fps : runFpsRef.current;
-    await Promise.all([
+    const [dataResult] = await Promise.all([
       loadData(cacheBust, generation, null, currentFps),
       loadHistory(cacheBust),
     ]);
+    if (generation !== loadGenerationRef.current) return false;
+
+    const validity = meta.trackingValidity?.available
+      ? meta.trackingValidity
+      : (dataResult?.trackingValidity || null);
+    setTrackingValidity(validity);
+    setRunTimestamp(meta.timestamp || null);
+    setRunProvenance({
+      runId: meta.runId,
+      filename: meta.filename || null,
+      timestamp: meta.timestamp || null,
+      durationMs: meta.durationMs ?? null,
+      stageLog: meta.stageLog || null,
+      frameIntegrity: meta.frameIntegrity || {
+        passed: meta.syncOk === true,
+        inputFrames: meta.inputFrames,
+        trackerFrames: meta.trackerFrames,
+        csvRows: meta.csvRows,
+        rawVideoFrames: meta.rawVideoFrames,
+        finalVideoFrames: meta.finalVideoFrames,
+        syncOk: meta.syncOk,
+      },
+      trackingValidity: validity,
+      startTime: meta.startTime || null,
+      endTime: meta.endTime || meta.timestamp || null,
+    });
+    // Only show annotated video when provenance is matched to published metadata.
+    setVideoAvailable(true);
+    return true;
   }, [loadEventsAndVerification, loadData, loadHistory]);
 
   useEffect(() => {
-    loadAll();
+    loadHistory();
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [loadAll]);
+  }, [loadHistory]);
 
   useEffect(() => {
-    if (!uploadJob.active) return undefined;
+    // Poll only after the server accepted the upload (runId present). Pre-runId
+    // the server is still idle and must not be treated as a cancelled run.
+    // While cancelling, handleCancelRun owns UI and awaits POST /api/reset.
+    if (!uploadJob.active || uploadJob.cancelling || !uploadJob.runId) return undefined;
 
     const poll = async () => {
       try {
+        if (cancellingRef.current) return;
         const statusRes = await fetch(`/api/status?t=${Date.now()}`, { cache: 'no-store' });
         const status = await statusRes.json();
+        if (cancellingRef.current) return;
 
-        setUploadJob((prev) => ({
-          ...prev,
-          progress: status.progress || prev.progress,
-          framesProcessed: status.framesProcessed || 0,
-        }));
+        setUploadJob((prev) => {
+          if (prev.cancelling) return prev;
+          if (status.status === 'stopping') {
+            return {
+              ...prev,
+              progress: 'Stopping run...',
+              stageLog: Array.isArray(status.stageLog) ? status.stageLog : prev.stageLog,
+              elapsedMs: status.elapsedMs ?? status.durationMs ?? prev.elapsedMs,
+            };
+          }
+          return {
+            ...prev,
+            progress: status.progress || prev.progress,
+            framesProcessed: status.framesProcessed || 0,
+            totalFrames: status.totalFrames ?? prev.totalFrames,
+            runId: status.runId || prev.runId,
+            uploadedFilename: status.uploadedFilename || prev.uploadedFilename,
+            stageLog: Array.isArray(status.stageLog) ? status.stageLog : prev.stageLog,
+            elapsedMs: status.elapsedMs ?? status.durationMs ?? prev.elapsedMs,
+            resultPublished: status.resultPublished ?? prev.resultPublished,
+          };
+        });
 
         if (status.status === 'done') {
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
-          setUploadJob({ active: false, progress: 'Loading results...', framesProcessed: 0, error: null });
-          await loadAll(Date.now());
-          setActiveTab('dashboard');
+          if (cancellingRef.current) return;
+          const completedRunId = status.runId;
+          setUploadJob({
+            active: false,
+            cancelling: false,
+            progress: 'Loading results...',
+            framesProcessed: status.framesProcessed || 0,
+            totalFrames: status.totalFrames,
+            error: null,
+            notice: null,
+            runId: completedRunId,
+            uploadedFilename: status.uploadedFilename,
+            stageLog: status.stageLog || [],
+            elapsedMs: status.durationMs ?? status.elapsedMs,
+            resultPublished: true,
+          });
+          const loaded = await loadAll(Date.now(), completedRunId);
+          if (loaded) setActiveTab('dashboard');
+          else {
+            setUploadJob((prev) => ({
+              ...prev,
+              error: 'Run finished but published metadata did not match the completed run ID.',
+              resultPublished: false,
+            }));
+          }
         } else if (status.status === 'error') {
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
+          if (cancellingRef.current) return;
+          // Do not loadAll - keep prior published bundle off the failed-attempt surface.
+          const cancelled = /cancel/i.test(status.error || '');
           setUploadJob({
             active: false,
+            cancelling: false,
+            progress: '',
+            framesProcessed: status.framesProcessed || 0,
+            totalFrames: status.totalFrames,
+            error: cancelled ? null : (status.error || 'Tracking failed. No new result was published.'),
+            notice: cancelled
+              ? 'Run cancelled. No new result was published; previous output left intact.'
+              : null,
+            runId: status.runId || null,
+            uploadedFilename: status.uploadedFilename || null,
+            stageLog: Array.isArray(status.stageLog) ? status.stageLog : [],
+            elapsedMs: status.durationMs ?? status.elapsedMs,
+            resultPublished: false,
+          });
+        } else if (status.status === 'idle') {
+          // Reset finished after a tracked run (epoch bump); reopen the upload gate in UI.
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          if (cancellingRef.current) return;
+          setUploadJob((prev) => ({
+            active: false,
+            cancelling: false,
             progress: '',
             framesProcessed: 0,
-            error: status.error || 'Tracking failed',
-          });
+            totalFrames: null,
+            error: null,
+            notice: 'Run cancelled. No new result was published; previous output left intact.',
+            runId: null,
+            uploadedFilename: prev.uploadedFilename,
+            stageLog: Array.isArray(status.stageLog) ? status.stageLog : [],
+            elapsedMs: status.elapsedMs ?? status.durationMs ?? prev.elapsedMs,
+            resultPublished: false,
+          }));
         }
       } catch { /* ignore transient poll errors */ }
     };
@@ -877,17 +1405,94 @@ function App() {
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = null;
     };
-  }, [uploadJob.active, loadAll]);
+  }, [uploadJob.active, uploadJob.cancelling, uploadJob.runId, loadAll]);
+
+  const handleCancelRun = useCallback(async () => {
+    if (cancellingRef.current) return;
+    cancellingRef.current = true;
+    const generation = loadGenerationRef.current;
+
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    try {
+      uploadAbortRef.current?.abort();
+    } catch { /* ignore */ }
+
+    setUploadJob((prev) => ({
+      ...prev,
+      active: true,
+      cancelling: true,
+      progress: 'Cancelling run...',
+      notice: null,
+      error: null,
+    }));
+
+    try {
+      const response = await fetch('/api/reset', { method: 'POST' });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error || 'Could not cancel run');
+      }
+      if (loadGenerationRef.current !== generation) return;
+      setUploadJob({
+        active: false,
+        cancelling: false,
+        progress: '',
+        framesProcessed: 0,
+        totalFrames: null,
+        error: null,
+        notice: 'Run cancelled. No new result was published; previous output left intact.',
+        runId: null,
+        uploadedFilename: null,
+        stageLog: [],
+        elapsedMs: null,
+        resultPublished: false,
+      });
+    } catch (err) {
+      if (loadGenerationRef.current !== generation) return;
+      setUploadJob((prev) => ({
+        ...prev,
+        active: false,
+        cancelling: false,
+        progress: '',
+        error: err.message || 'Could not cancel run',
+        notice: null,
+        resultPublished: false,
+      }));
+    } finally {
+      cancellingRef.current = false;
+    }
+  }, []);
 
   const handleFileSelect = async (file) => {
     if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = null;
+    cancellingRef.current = false;
+    try {
+      uploadAbortRef.current?.abort();
+    } catch { /* ignore */ }
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
     loadGenerationRef.current += 1;
+    const generation = loadGenerationRef.current;
     setActiveTab('upload');
+    // Invalidate any previous result so old tracked.mp4 cannot look like this upload.
+    clearCurrentResultDisplay();
     setUploadJob({
-      active: false,
+      active: true,
+      cancelling: false,
       progress: 'Uploading video...',
       framesProcessed: 0,
+      totalFrames: null,
       error: null,
+      notice: null,
+      runId: null,
+      uploadedFilename: file?.name || null,
+      stageLog: [],
+      elapsedMs: 0,
+      resultPublished: null,
     });
 
     const formData = new FormData();
@@ -899,30 +1504,55 @@ function App() {
     formData.append('boutMinFrames', settings.boutMinFrames);
 
     try {
-      const response = await fetch('/api/upload', { method: 'POST', body: formData });
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
+      if (loadGenerationRef.current !== generation || cancellingRef.current) return;
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
         throw new Error(errData.error || 'Upload failed');
       }
+      const body = await response.json().catch(() => ({}));
+      if (loadGenerationRef.current !== generation || cancellingRef.current) return;
       setUploadJob({
         active: true,
+        cancelling: false,
         progress: 'Starting tracker...',
         framesProcessed: 0,
+        totalFrames: null,
         error: null,
+        notice: null,
+        runId: body.runId || null,
+        uploadedFilename: file?.name || null,
+        stageLog: [],
+        elapsedMs: 0,
+        resultPublished: false,
       });
     } catch (err) {
+      if (loadGenerationRef.current !== generation) return;
+      // User cancelled via AbortController — handleCancelRun owns final UI state.
+      if (err?.name === 'AbortError' || cancellingRef.current) return;
       setUploadJob({
         active: false,
+        cancelling: false,
         progress: '',
         framesProcessed: 0,
+        totalFrames: null,
         error: err.message || 'Upload failed',
+        notice: null,
+        runId: null,
+        uploadedFilename: file?.name || null,
+        stageLog: [],
+        elapsedMs: null,
+        resultPublished: false,
       });
     }
   };
 
   return (
-    <div className={`h-screen font-sans antialiased overflow-hidden transition-colors duration-300 ${isDark ? 'dark bg-[#000000] text-zinc-100' : 'bg-zinc-50 text-zinc-900'}`}>
-
+    <div className={`flyt-app ${isDark ? 'dark' : ''}`}>
       {isSettingsOpen && (
         <SettingsModal
           onClose={() => setIsSettingsOpen(false)}
@@ -931,135 +1561,189 @@ function App() {
         />
       )}
 
-      <div className="flex h-full w-full">
-        {/* Sidebar */}
-        <aside className="w-56 bg-[#F4F4F5] dark:bg-[#000000] border-r border-zinc-200 dark:border-zinc-800 flex flex-col flex-shrink-0 z-10 transition-colors duration-300">
-          <div className="h-16 flex items-center px-5 border-b border-zinc-200 dark:border-zinc-800">
-             <div className="w-5 h-5 bg-zinc-900 dark:bg-white flex items-center justify-center mr-2 rounded-[2px] shadow-sm dark:shadow-none">
-                <Bug size={14} className="text-white dark:text-black" />
-             </div>
-             <span className="font-bold text-sm tracking-tight text-zinc-900 dark:text-white">Flyt</span>
+      <header className="flyt-top no-print">
+        <button type="button" className="flyt-brand" onClick={() => setActiveTab('dashboard')}>
+          <img src="/flyt-mark.svg" alt="" width={25} height={25} />
+          <span>Flyt</span>
+        </button>
+        <nav className="flyt-tabs" aria-label="Primary">
+          <button
+            type="button"
+            className={`flyt-tab ${activeTab === 'dashboard' ? 'active' : ''}`}
+            aria-current={activeTab === 'dashboard' ? 'page' : undefined}
+            onClick={() => setActiveTab('dashboard')}
+          >
+            Overview
+          </button>
+          <button
+            type="button"
+            className={`flyt-tab ${activeTab === 'upload' ? 'active' : ''}`}
+            aria-current={activeTab === 'upload' ? 'page' : undefined}
+            onClick={() => setActiveTab('upload')}
+          >
+            New run
+          </button>
+          <button
+            type="button"
+            className={`flyt-tab ${activeTab === 'runs' ? 'active' : ''}`}
+            aria-current={activeTab === 'runs' ? 'page' : undefined}
+            onClick={() => setActiveTab('runs')}
+          >
+            History
+          </button>
+          <button
+            type="button"
+            className="flyt-tab"
+            onClick={() => setIsSettingsOpen(true)}
+          >
+            Settings
+          </button>
+        </nav>
+        <div className="flyt-top-actions">
+          <button
+            type="button"
+            className="flyt-btn hide-sm"
+            disabled={data.length === 0}
+            onClick={() => exportPrismCsv(data, runFps)}
+          >
+            <DownloadCloud size={14} /> CSV
+          </button>
+          <button type="button" className="flyt-btn flyt-btn-dark hide-sm" onClick={triggerPdfReport}>
+            <FileText size={14} /> Print report
+          </button>
+          <button
+            type="button"
+            className="flyt-btn flyt-btn-ghost"
+            onClick={() => setIsDark(!isDark)}
+            aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
+          >
+            {isDark ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+          <button
+            type="button"
+            className="flyt-btn flyt-btn-ghost"
+            onClick={() => setIsSettingsOpen(true)}
+            aria-label="Open settings"
+          >
+            <Settings size={16} />
+          </button>
+        </div>
+      </header>
+
+      {uploadJob.active && (
+        <div className="flyt-progress-bar no-print" role="status">
+          <span>{uploadJob.progress}</span>
+          {!uploadJob.cancelling && Number.isFinite(uploadJob.totalFrames) && uploadJob.totalFrames > 0 ? (
+            <span className="mono">
+              {uploadJob.framesProcessed || 0} / {uploadJob.totalFrames}
+              {' '}
+              ({Math.min(100, Math.round(((uploadJob.framesProcessed || 0) / uploadJob.totalFrames) * 100))}%)
+            </span>
+          ) : !uploadJob.cancelling && uploadJob.framesProcessed > 0 ? (
+            <span className="mono">{uploadJob.framesProcessed} frames</span>
+          ) : null}
+          {!uploadJob.cancelling && Number.isFinite(uploadJob.elapsedMs) && (
+            <span className="mono">{formatDurationMs(uploadJob.elapsedMs)}</span>
+          )}
+          <button
+            type="button"
+            className="flyt-btn flyt-btn-cancel flyt-btn-cancel-compact"
+            onClick={handleCancelRun}
+            disabled={uploadJob.cancelling}
+            aria-busy={uploadJob.cancelling}
+          >
+            <X size={13} />
+            {uploadJob.cancelling ? 'Cancelling…' : 'Cancel'}
+          </button>
+        </div>
+      )}
+
+      <main>
+        <div className={`flyt-page ${activeTab === 'upload' ? 'compact' : ''}`}>
+          <div className={activeTab === 'dashboard' ? '' : 'hidden'}>
+            <DashboardView
+              data={data}
+              stats={stats}
+              heatmapData={heatmapData}
+              events={events}
+              reviewsByEventId={reviewsByEventId}
+              runTimestamp={runTimestamp}
+              mediaCacheBust={mediaCacheBust}
+              runFps={runFps}
+              totalFrames={totalFrames}
+              activeEventId={activeEventId}
+              isHistoricRun={isHistoricRun}
+              runProvenance={runProvenance}
+              videoAvailable={videoAvailable}
+              trackingValidity={trackingValidity}
+              onSeekEvent={setActiveEventId}
+              onVerdict={handleVerdict}
+            />
           </div>
 
-          <nav className="p-4 flex-1 flex flex-col gap-1.5">
-              <button
-                type="button"
-                onClick={() => setActiveTab('dashboard')}
-                className={`flex items-center gap-2.5 px-3 py-2 rounded-sm text-[13px] font-medium transition-colors ${activeTab === 'dashboard' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-sm border border-zinc-200 dark:border-zinc-800' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 hover:bg-white/50 dark:hover:bg-zinc-900/50 border border-transparent'}`}
-              >
-                <Home size={16} /> Dashboard
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('upload')}
-                className={`flex items-center gap-2.5 px-3 py-2 rounded-sm text-[13px] font-medium transition-colors ${activeTab === 'upload' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-sm border border-zinc-200 dark:border-zinc-800' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 hover:bg-white/50 dark:hover:bg-zinc-900/50 border border-transparent'}`}
-              >
-                <UploadCloud size={16} /> Analyze Output
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('runs')}
-                className={`flex items-center gap-2.5 px-3 py-2 rounded-sm text-[13px] font-medium transition-colors ${activeTab === 'runs' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-sm border border-zinc-200 dark:border-zinc-800' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 hover:bg-white/50 dark:hover:bg-zinc-900/50 border border-transparent'}`}
-              >
-                <FolderKanban size={16} /> History
-              </button>
-          </nav>
-          
-          <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
-              <button 
-                onClick={() => setIsSettingsOpen(true)}
-                className="p-1.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-white rounded-sm hover:bg-zinc-200 dark:hover:bg-zinc-900 transition-colors">
-                 <Settings size={16} />
-              </button>
-              <button 
-                onClick={() => setIsDark(!isDark)}
-                className="p-1.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-white rounded-sm hover:bg-zinc-200 dark:hover:bg-zinc-900 transition-colors">
-                 {isDark ? <Sun size={16} /> : <Moon size={16} />}
-              </button>
-          </div>
-        </aside>
+          {activeTab === 'upload' && (
+            <UploadView
+              uploadJob={uploadJob}
+              onFileSelect={handleFileSelect}
+              onCancel={handleCancelRun}
+            />
+          )}
 
-        {/* Main Content Area */}
-        <main className="flex-1 overflow-y-auto bg-zinc-50 dark:bg-[#000000] transition-colors duration-300 relative">
-          {uploadJob.active && (
-            <div className="sticky top-0 z-20 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900/50 px-6 py-2 text-xs text-amber-800 dark:text-amber-200">
-              {uploadJob.progress}
-              {uploadJob.framesProcessed > 0 && (
-                <span className="font-mono ml-2">{uploadJob.framesProcessed} frames</span>
-              )}
+          {activeTab === 'runs' && (
+            <div>
+              <div className="flyt-title-row">
+                <div>
+                  <div className="flyt-eyeline">archived datasets</div>
+                  <h1 className="flyt-h1">Run history</h1>
+                  <p className="flyt-lead">
+                    Click a run to load its CSV and events. Historic video is not archived.
+                  </p>
+                </div>
+                {history.length > 0 && (
+                  <button type="button" className="flyt-btn" onClick={clearHistoryServer}>
+                    Clear history
+                  </button>
+                )}
+              </div>
+
+              <div className="flyt-history-table">
+                <div className="flyt-history-head">
+                  <div>Identifier</div>
+                  <div>Date</div>
+                  <div>Bouts</div>
+                  <div>Avg prox</div>
+                  <div>Duration</div>
+                </div>
+                {history.length === 0 ? (
+                  <div className="flyt-empty">No runs in history yet. Complete a tracking job to populate this list.</div>
+                ) : (
+                  history.map((run) => (
+                    <button
+                      key={run.runId}
+                      type="button"
+                      className="flyt-history-row"
+                      onClick={() => loadHistoricRun(run)}
+                    >
+                      <div className="flyt-mono" style={{ fontSize: 12, fontWeight: 650 }}>{run.runId}</div>
+                      <div className="flyt-muted" style={{ fontSize: 12 }}>{formatRunDate(run.timestamp)}</div>
+                      <div style={{ fontSize: 12 }}>{run.detectedBouts ?? 0} detected</div>
+                      <div className="flyt-mono" style={{ fontSize: 12 }}>
+                        {run.avgProximity != null ? `${run.avgProximity}px` : 'n/a'}
+                      </div>
+                      <div className="flyt-mono" style={{ fontSize: 12 }}>
+                        {run.durationSec != null ? `${run.durationSec}s` : 'n/a'}
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
           )}
-          <div className="max-w-6xl mx-auto p-8 lg:p-10">
-            <div className={activeTab === 'dashboard' ? '' : 'hidden'}>
-              <DashboardView
-                data={data}
-                stats={stats}
-                heatmapData={heatmapData}
-                events={events}
-                reviewsByEventId={reviewsByEventId}
-                runTimestamp={runTimestamp}
-                mediaCacheBust={mediaCacheBust}
-                runFps={runFps}
-                totalFrames={totalFrames}
-                activeEventId={activeEventId}
-                isHistoricRun={isHistoricRun}
-                onSeekEvent={setActiveEventId}
-                onVerdict={handleVerdict}
-              />
-            </div>
-            {activeTab === 'upload' && (
-              <UploadView uploadJob={uploadJob} onFileSelect={handleFileSelect} />
-            )}
-            {activeTab === 'runs' && (
-              <div className="animate-in fade-in duration-300">
-                <header className="mb-6 flex justify-between items-center">
-                  <h2 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">Run History</h2>
-                  {history.length > 0 && (
-                    <button
-                      onClick={clearHistoryServer}
-                      className="px-3 py-1.5 text-xs font-semibold bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-sm transition-colors border border-red-200 dark:border-red-900/50">
-                       Clear History
-                    </button>
-                  )}
-                </header>
-                <div className="w-full bg-white dark:bg-[#000000] border border-zinc-200 dark:border-zinc-800 rounded-sm overflow-hidden shadow-sm dark:shadow-none">
-                   <div className="grid grid-cols-5 p-4 border-b border-zinc-200 dark:border-zinc-800 text-[10px] font-bold text-zinc-500 uppercase tracking-widest bg-zinc-50 dark:bg-[#050505]">
-                      <div>Identifier</div>
-                      <div>Date</div>
-                      <div>Bouts</div>
-                      <div>Avg Prox</div>
-                      <div>Duration</div>
-                   </div>
-                   {history.length === 0 ? (
-                     <div className="p-8 text-center text-sm text-zinc-500 dark:text-zinc-400">No runs found in history. Run a tracking job to populate this list.</div>
-                   ) : (
-                     history.map((run) => (
-                       <div
-                         key={run.runId}
-                         onClick={() => loadHistoricRun(run)}
-                         className="grid grid-cols-5 p-4 border-b border-zinc-200 dark:border-zinc-800 text-sm items-center hover:bg-zinc-50 dark:hover:bg-zinc-900/50 cursor-pointer transition-colors group last:border-b-0">
-                          <div className="font-mono text-xs font-semibold text-zinc-900 dark:text-white">{run.runId}</div>
-                          <div className="text-zinc-500 dark:text-zinc-400 text-xs">{formatRunDate(run.timestamp)}</div>
-                          <div>
-                            <span className="flex items-center gap-1.5">
-                              <Check size={14} className="text-zinc-900 dark:text-white" />
-                              <span className="text-xs font-medium text-zinc-900 dark:text-zinc-300">{run.detectedBouts ?? 0} detected</span>
-                            </span>
-                          </div>
-                          <div className="text-zinc-500 dark:text-zinc-400 text-xs font-mono">{run.avgProximity != null ? `${run.avgProximity}px` : '—'}</div>
-                          <div className="text-zinc-500 dark:text-zinc-400 text-xs font-mono">{run.durationSec != null ? `${run.durationSec}s` : '—'}</div>
-                       </div>
-                     ))
-                   )}
-                </div>
-                <p className="mt-3 text-[10px] text-zinc-400 uppercase tracking-widest">Click any run to load its dataset into the dashboard. Video is not archived for past runs.</p>
-              </div>
-            )}
-          </div>
-        </main>
-      </div>
+        </div>
+      </main>
     </div>
   );
 }
+
 
 export default App;

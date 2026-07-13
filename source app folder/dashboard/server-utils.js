@@ -62,6 +62,166 @@ export function countCsvRows(csvPath) {
   return content ? content.split(/\r?\n/).length - 1 : 0;
 }
 
+/** Max timestamped stage-log entries retained on a job (progress replaces in place). */
+export const MAX_STAGE_LOG_ENTRIES = 48;
+
+/**
+ * Buffer partial stdout until complete newline-delimited lines are available.
+ * Stream chunks are not guaranteed to contain full lines.
+ */
+export function createLineBuffer(onLine) {
+  let buffer = '';
+  return {
+    push(chunk) {
+      buffer += String(chunk ?? '');
+      let newlineIndex = buffer.indexOf('\n');
+      while (newlineIndex >= 0) {
+        const line = buffer.slice(0, newlineIndex).replace(/\r$/, '');
+        buffer = buffer.slice(newlineIndex + 1);
+        onLine(line);
+        newlineIndex = buffer.indexOf('\n');
+      }
+    },
+    flush() {
+      if (!buffer) return;
+      const line = buffer.replace(/\r$/, '');
+      buffer = '';
+      if (line) onLine(line);
+    },
+    get pending() {
+      return buffer;
+    },
+  };
+}
+
+/** Parse tracker progress lines: "Processed N frames..." */
+export function parseProcessedFramesLine(line) {
+  const match = String(line).match(/^\s*Processed\s+(\d+)\s+frames/i);
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * Append a timestamped stage-log entry. Progress stages replace the last progress
+ * entry to stay bounded. Returns false when the caller reports a stale context.
+ */
+export function appendStageLog(stageLog, entry, {
+  isCurrent,
+  now = () => Date.now(),
+  maxEntries = MAX_STAGE_LOG_ENTRIES,
+} = {}) {
+  if (typeof isCurrent === 'function' && !isCurrent()) return false;
+  if (!Array.isArray(stageLog)) return false;
+
+  const record = {
+    t: new Date(typeof entry.t === 'number' ? entry.t : (entry.t ? Date.parse(entry.t) : now())).toISOString(),
+    stage: String(entry.stage || 'stage'),
+    message: String(entry.message || ''),
+  };
+  if (Number.isFinite(entry.frames)) record.frames = Number(entry.frames);
+  if (Number.isFinite(entry.total)) record.total = Number(entry.total);
+
+  if (record.stage === 'tracker_progress' && stageLog.length > 0) {
+    const last = stageLog[stageLog.length - 1];
+    if (last.stage === 'tracker_progress') {
+      stageLog[stageLog.length - 1] = record;
+      return true;
+    }
+  }
+
+  stageLog.push(record);
+  if (stageLog.length > maxEntries) {
+    stageLog.splice(0, stageLog.length - maxEntries);
+  }
+  return true;
+}
+
+/**
+ * Browser-safe diagnostic text: no full stderr dumps, no filesystem paths.
+ * Always notes when no new result was published for pipeline failures.
+ */
+export function toClientErrorMessage(error) {
+  const raw = String(error?.message || error || 'Unknown error');
+  let msg = raw
+    .replace(/[A-Za-z]:\\[^\s"'`]+/g, '[path]')
+    .replace(/\/(?:Users|home|tmp|var|opt|private|mnt)[^\s"'`]+/g, '[path]')
+    .replace(/\r?\n+/g, ' ')
+    .trim();
+  if (msg.length > 280) msg = `${msg.slice(0, 277)}...`;
+
+  if (/abort/i.test(msg) && /run|cancel/i.test(msg)) {
+    return 'Run was cancelled.';
+  }
+  if (/Frame integrity mismatch/i.test(msg)) {
+    return `${msg} No new result was published; previous published output was preserved.`;
+  }
+  if (/TRACKER_SYNC|Frame integrity evidence missing/i.test(msg)) {
+    return 'Tracker did not report valid frame sync evidence. No new result was published; previous published output was preserved.';
+  }
+  if (/Tracker exited with code/i.test(msg)) {
+    return 'Tracker process failed. No new result was published; previous published output was preserved.';
+  }
+  if (/ffmpeg/i.test(msg)) {
+    return 'Video processing failed. No new result was published; previous published output was preserved.';
+  }
+  if (!/no new result/i.test(msg)) {
+    return `${msg} No new result was published.`;
+  }
+  return msg;
+}
+
+/**
+ * Summarize measured two-fly observation frames from a CSV path.
+ * Uses tracking_valid when present; otherwise conservative detection/area fallbacks.
+ * Returns { available, validFrames, totalFrames, percent } or unavailable shape.
+ */
+export function summarizeTrackingValidityFromCsv(csvPath) {
+  if (!csvPath || !fs.existsSync(csvPath)) {
+    return { available: false, validFrames: null, totalFrames: 0, percent: null };
+  }
+  const lines = fs.readFileSync(csvPath, 'utf8').trim().split(/\r?\n/);
+  if (lines.length < 2) {
+    return { available: false, validFrames: null, totalFrames: 0, percent: null };
+  }
+  const headers = lines[0].split(',').map((h) => h.trim());
+  const trackingValidIndex = headers.indexOf('tracking_valid');
+  const detectionCountIndex = headers.indexOf('detection_count');
+  const fly1AreaIndex = headers.indexOf('fly1_area');
+  const fly2AreaIndex = headers.indexOf('fly2_area');
+  const occlusionIndex = headers.indexOf('occlusion_flag');
+  const dataRows = lines.slice(1).filter((line) => line.trim().length > 0);
+  const totalFrames = dataRows.length;
+
+  const hasTrackingValid = trackingValidIndex >= 0;
+  const hasDetection = detectionCountIndex >= 0;
+  const hasAreas = fly1AreaIndex >= 0 && fly2AreaIndex >= 0;
+  if (!hasTrackingValid && !hasDetection && !hasAreas) {
+    return { available: false, validFrames: null, totalFrames, percent: null };
+  }
+
+  let validFrames = 0;
+  dataRows.forEach((line) => {
+    const columns = line.split(',');
+    const occluded = occlusionIndex >= 0 && Number(columns[occlusionIndex]) !== 0;
+    if (occluded) return;
+    if (hasTrackingValid) {
+      if (Number(columns[trackingValidIndex]) === 1) validFrames += 1;
+      return;
+    }
+    if (hasDetection) {
+      if (Number(columns[detectionCountIndex]) >= 2) validFrames += 1;
+      return;
+    }
+    if (Number(columns[fly1AreaIndex]) > 0 && Number(columns[fly2AreaIndex]) > 0) {
+      validFrames += 1;
+    }
+  });
+
+  const percent = totalFrames > 0
+    ? Math.round((validFrames / totalFrames) * 1000) / 10
+    : null;
+  return { available: true, validFrames, totalFrames, percent };
+}
+
 export function parseTrackerSync(stdout) {
   const matches = [...String(stdout).matchAll(
     /TRACKER_SYNC frames_processed=(\d+) csv_rows=(\d+) expected_video_frames=(\d+) sync_ok=(true|false)/g,
@@ -207,13 +367,20 @@ export function runCommand(command, args, {
   onStdout,
   onStderr,
   killOptions,
+  env,
+  cwd,
 } = {}) {
   if (signal?.aborted) return Promise.reject(new AbortRunError());
 
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawnFn(command, args);
+      const spawnOpts = {};
+      if (env) spawnOpts.env = env;
+      if (cwd) spawnOpts.cwd = cwd;
+      child = Object.keys(spawnOpts).length > 0
+        ? spawnFn(command, args, spawnOpts)
+        : spawnFn(command, args);
     } catch (error) {
       reject(error);
       return;
@@ -586,6 +753,12 @@ export function prepareRunHistoryBundle({
   csvSrc,
   eventsSrc,
   verificationSrc,
+  metadataSrc = null,
+  trackingValidity = null,
+  frameIntegrity = null,
+  stageLog = null,
+  startTime = null,
+  endTime = null,
 }) {
   const safeRunId = requireRunId(runId);
   for (const source of [csvSrc, eventsSrc, verificationSrc]) {
@@ -596,28 +769,40 @@ export function prepareRunHistoryBundle({
   if (history.runs.some((run) => run.runId === safeRunId)) {
     throw new Error(`History run already exists: ${safeRunId}`);
   }
+  const completedAt = endTime
+    ? new Date(typeof endTime === 'number' ? endTime : Date.parse(endTime)).toISOString()
+    : new Date().toISOString();
   const meta = {
     runId: safeRunId,
-    timestamp: new Date().toISOString(),
+    timestamp: completedAt,
     filename: filename || 'unknown',
     durationSec: Math.round((durationSec || 0) * 10) / 10,
     fps: fps || null,
     totalFrames: totalFrames || null,
     avgProximity: readCsvAvgProximity(csvSrc),
     detectedBouts: countCourtshipBouts(eventsSrc),
+    trackingValidity: trackingValidity || null,
+    frameIntegrity: frameIntegrity || null,
+    stageLog: Array.isArray(stageLog) ? stageLog : null,
+    startTime: startTime || null,
+    endTime: completedAt,
   };
   history.runs.unshift(meta);
   writeJson(historyIndexOutput, history);
 
   const runDir = path.join(historyDir, safeRunId);
+  const entries = [
+    { source: csvSrc, destination: path.join(runDir, 'data.csv') },
+    { source: eventsSrc, destination: path.join(runDir, 'events.json') },
+    { source: verificationSrc, destination: path.join(runDir, 'verification.json') },
+    { source: historyIndexOutput, destination: historyMetaPath },
+  ];
+  if (metadataSrc && fs.existsSync(metadataSrc)) {
+    entries.push({ source: metadataSrc, destination: path.join(runDir, 'run_metadata.json') });
+  }
   return {
     meta,
-    entries: [
-      { source: csvSrc, destination: path.join(runDir, 'data.csv') },
-      { source: eventsSrc, destination: path.join(runDir, 'events.json') },
-      { source: verificationSrc, destination: path.join(runDir, 'verification.json') },
-      { source: historyIndexOutput, destination: historyMetaPath },
-    ],
+    entries,
   };
 }
 

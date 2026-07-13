@@ -28,3 +28,29 @@ test('dashboard and Prism export use validity-aware proximity helpers', () => {
   assert.match(source, /prismDistance\(r\)/);
   assert.doesNotMatch(source, /Number\(r\.proximity_distance \?\? 0\)/);
 });
+
+test('current video requires validated provenance and clears on new upload', () => {
+  const source = appSource();
+  assert.match(source, /videoAvailable && runProvenance\?\.runId/);
+  assert.match(source, /clearCurrentResultDisplay/);
+  assert.match(source, /loadAll\(Date\.now\(\), completedRunId\)/);
+  assert.match(source, /No new result was published/);
+  assert.match(source, /Tracking validity/);
+  assert.match(source, /summarizeTrackingValidity/);
+  // Must not unconditionally mount tracked.mp4 for non-historic data.
+  assert.doesNotMatch(
+    source,
+    /isHistoricRun \? \([\s\S]*?\) : \(\s*<video[\s\S]*?src=\{`\/tracked\.mp4/,
+  );
+});
+
+test('initial mount loads history only and does not load a previous run automatically', () => {
+  const source = appSource();
+  // Ensure we call loadHistory on mount, not loadAll.
+  assert.match(source, /useEffect\(\(\) => \{\s*loadHistory\(\);/);
+  assert.doesNotMatch(source, /useEffect\(\(\) => \{\s*loadAll\(\);/);
+  // Check that DashboardView shows empty state when no run ID is loaded.
+  assert.match(source, /!runProvenance\?\.runId/);
+  assert.match(source, /No tracking run loaded/);
+});
+

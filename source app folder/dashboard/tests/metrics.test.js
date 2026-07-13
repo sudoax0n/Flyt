@@ -5,6 +5,7 @@ import {
   prismDistance,
   prismVelocity,
   proximityValue,
+  summarizeTrackingValidity,
 } from '../src/metrics.js';
 
 test('carried coordinates from missing detections do not bias proximity metrics', () => {
@@ -74,4 +75,25 @@ test('invalid or merged observations export blank individual-fly velocities', ()
     occlusion_flag: 0,
     fly1_speed_pxsec: 42.5,
   }, 'fly1'), 42.5);
+});
+
+test('summarizeTrackingValidity counts tracking_valid=1 and marks pure legacy unavailable', () => {
+  const summary = summarizeTrackingValidity([
+    { tracking_valid: 1, occlusion_flag: 0 },
+    { tracking_valid: 0, occlusion_flag: 0 },
+    { tracking_valid: 1, occlusion_flag: 1 },
+    { tracking_valid: 1, occlusion_flag: 0 },
+  ]);
+  assert.equal(summary.available, true);
+  assert.equal(summary.validFrames, 2);
+  assert.equal(summary.totalFrames, 4);
+  assert.equal(summary.percent, 50);
+
+  const legacy = summarizeTrackingValidity([
+    { proximity_distance: 10, occlusion_flag: 0 },
+    { proximity_distance: 12, occlusion_flag: 0 },
+  ]);
+  assert.equal(legacy.available, false);
+  assert.equal(legacy.validFrames, null);
+  assert.equal(legacy.totalFrames, 2);
 });
